@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ArchitectLuna.Cli</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>architect-luna</AssemblyName>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>architect-luna</ToolCommandName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ArchitectLuna.Core/ArchitectLuna.Core.csproj" />
+    <ProjectReference Include="../ArchitectLuna.Templates/ArchitectLuna.Templates.csproj" />
+    <ProjectReference Include="../ArchitectLuna.Adapters.MediatR/ArchitectLuna.Adapters.MediatR.csproj" />
+    <ProjectReference Include="../ArchitectLuna.Adapters.Wolverine/ArchitectLuna.Adapters.Wolverine.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,11 @@
+namespace {{ namespace }};
+
+public static class {{ handler_name }}
+{
+    public static {{ result_type }} Handle({{ message_name }} message)
+    {
+        // <architect:region name="handler-body">
+        throw new NotImplementedException();
+        // </architect:region>
+    }
+}

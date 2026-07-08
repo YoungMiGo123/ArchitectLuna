@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ArchitectLuna.Adapters.MediatR</RootNamespace>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../ArchitectLuna.Core/ArchitectLuna.Core.csproj" />
+    <ProjectReference Include="../ArchitectLuna.Templates/ArchitectLuna.Templates.csproj" />
+  </ItemGroup>
+
+</Project>

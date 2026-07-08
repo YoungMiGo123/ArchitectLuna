@@ -1,0 +1,20 @@
+namespace ArchitectLuna.Core.Model;
+
+/// <summary>
+/// Root of the Intent Model persisted at .architect/model.yaml.
+/// </summary>
+public sealed class ArchitectModel
+{
+    public int SchemaVersion { get; init; } = 1;
+
+    public required string SolutionName { get; init; }
+
+    public required string Namespace { get; init; }
+
+    /// <summary>
+    /// The backend adapter that owns code generation for this model: "mediatr" or "wolverine".
+    /// </summary>
+    public required string Adapter { get; init; }
+
+    public List<FeatureModel> Features { get; init; } = new();
+}

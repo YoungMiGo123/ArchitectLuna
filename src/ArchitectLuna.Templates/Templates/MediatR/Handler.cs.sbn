@@ -1,0 +1,13 @@
+using MediatR;
+
+namespace {{ namespace }};
+
+public sealed class {{ handler_name }} : IRequestHandler<{{ message_name }}, {{ result_type }}>
+{
+    public Task<{{ result_type }}> Handle({{ message_name }} request, CancellationToken cancellationToken)
+    {
+        // <architect:region name="handler-body">
+        throw new NotImplementedException();
+        // </architect:region>
+    }
+}
