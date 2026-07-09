@@ -1,17 +1,19 @@
 using ArchitectLuna.Core.Generation;
 using ArchitectLuna.Core.Model;
 using ArchitectLuna.Persistence.EfCore;
+using ArchitectLuna.Persistence.InMemory;
 using ArchitectLuna.Persistence.Marten;
 
 namespace ArchitectLuna.Cli.Adapters;
 
 public static class PersistenceRegistry
 {
-    public static readonly string[] KnownProviders = { "none", "efcore-postgres", "efcore-sqlserver", "marten" };
+    public static readonly string[] KnownProviders = { "none", "in-memory", "efcore-postgres", "efcore-sqlserver", "marten" };
 
     public static IPersistenceGenerator Resolve(string providerName) => providerName switch
     {
         "none" => new NullPersistenceGenerator(),
+        "in-memory" => new InMemoryPersistenceGenerator(),
         "efcore-postgres" => new EfCorePersistenceGenerator(EfCoreProviderKind.Postgres),
         "efcore-sqlserver" => new EfCorePersistenceGenerator(EfCoreProviderKind.SqlServer),
         "marten" => new MartenPersistenceGenerator(),
@@ -22,6 +24,7 @@ public static class PersistenceRegistry
     public static IPersistenceGenerator Resolve(PersistenceProvider provider) => provider switch
     {
         PersistenceProvider.None => new NullPersistenceGenerator(),
+        PersistenceProvider.InMemory => new InMemoryPersistenceGenerator(),
         PersistenceProvider.EfCorePostgres => new EfCorePersistenceGenerator(EfCoreProviderKind.Postgres),
         PersistenceProvider.EfCoreSqlServer => new EfCorePersistenceGenerator(EfCoreProviderKind.SqlServer),
         PersistenceProvider.Marten => new MartenPersistenceGenerator(),
@@ -31,6 +34,7 @@ public static class PersistenceRegistry
     public static PersistenceProvider ParseProvider(string providerName) => providerName switch
     {
         "none" => PersistenceProvider.None,
+        "in-memory" => PersistenceProvider.InMemory,
         "efcore-postgres" => PersistenceProvider.EfCorePostgres,
         "efcore-sqlserver" => PersistenceProvider.EfCoreSqlServer,
         "marten" => PersistenceProvider.Marten,

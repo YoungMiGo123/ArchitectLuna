@@ -11,11 +11,23 @@ namespace ArchitectLuna.Core.Generation;
 /// </summary>
 public interface IPersistenceGenerator
 {
-    /// <summary>Provider key as used in the --persistence CLI flag ("none", "efcore-postgres", "efcore-sqlserver", "marten").</summary>
+    /// <summary>Provider key as used in the --persistence CLI flag ("none", "in-memory", "efcore-postgres", "efcore-sqlserver", "marten").</summary>
     string Name { get; }
 
-    /// <summary>NuGet package IDs the generated API project must reference for this provider to compile.</summary>
+    /// <summary>NuGet package IDs the project owning the concrete implementation (Infrastructure, or the Api project itself for vertical slice) must reference for this provider to compile.</summary>
     IReadOnlyList<string> RequiredPackages { get; }
+
+    /// <summary>
+    /// NuGet package IDs the Application project must reference. Handler bodies (Store/Load/
+    /// SaveChanges-style calls) always live in Application, so it needs at least the persistence
+    /// library's own types even when it doesn't own the concrete implementation — e.g. EF Core's
+    /// bare `Microsoft.EntityFrameworkCore` for the `DbSet&lt;T&gt;`-shaped interface it owns under
+    /// Clean Architecture (never the database-specific provider package, which is an Infrastructure
+    /// concern only). For vertical slice, Application and Infrastructure are the same project, so
+    /// this is a strict subset of <see cref="RequiredPackages"/> already covered there — the caller
+    /// only needs to add it separately when <see cref="GenerationContext.HasSeparateInfrastructure"/>.
+    /// </summary>
+    IReadOnlyList<string> ApplicationRequiredPackages { get; }
 
     /// <summary>
     /// Files generated once per entity (e.g. an EF Core `IEntityTypeConfiguration&lt;T&gt;`
@@ -43,9 +55,13 @@ public interface IPersistenceGenerator
     /// <summary>
     /// Source lines to splice into the scaffolded Program.cs (after the adapter's own bootstrap,
     /// before the app is built) to register this provider, e.g. `builder.Services.AddDbContext...`.
-    /// Return an empty list for "no registration needed."
+    /// Takes the full <see cref="GenerationContext"/> (not just the solution name) so registration
+    /// can correctly qualify the concrete type's namespace under <see cref="GenerationContext.Infrastructure"/>
+    /// and, when <see cref="GenerationContext.HasSeparateInfrastructure"/>, also wire the interface
+    /// abstraction living in <see cref="GenerationContext.Application"/>. Return an empty list for
+    /// "no registration needed."
     /// </summary>
-    IReadOnlyList<string> BuildProgramCsRegistration(string solutionName);
+    IReadOnlyList<string> BuildProgramCsRegistration(GenerationContext context);
 
     /// <summary>Using directives BuildProgramCsRegistration's lines need, e.g. "Microsoft.EntityFrameworkCore".</summary>
     IReadOnlyList<string> ProgramCsUsings { get; }

@@ -40,14 +40,15 @@ jobs:
         run: dotnet test ArchitectLuna.sln --no-build --configuration Release
 
   e2e-smoke:
-    name: CLI smoke (${{ matrix.adapter }} / ${{ matrix.persistence }})
+    name: CLI smoke (${{ matrix.adapter }} / ${{ matrix.persistence }} / ${{ matrix.architecture }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         adapter: [mediatr, wolverine]
-        persistence: [none, efcore-postgres, efcore-sqlserver, marten]
+        persistence: [none, in-memory, efcore-postgres, efcore-sqlserver, marten]
+        architecture: [vertical-slice, clean-architecture]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,18 +61,21 @@ jobs:
       - name: Build CLI
         run: dotnet build src/ArchitectLuna.Cli/ArchitectLuna.Cli.csproj --configuration Release
 
-      - name: new api / add feature / add entity / generate / build
+      - name: new api (fresh build) / add feature / add entity / generate / build
         shell: bash
         run: |
           set -euo pipefail
 
           cli_dll="$GITHUB_WORKSPACE/src/ArchitectLuna.Cli/bin/Release/net10.0/architect-luna.dll"
-          work_dir="$RUNNER_TEMP/smoke-${{ matrix.adapter }}-${{ matrix.persistence }}"
+          work_dir="$RUNNER_TEMP/smoke-${{ matrix.adapter }}-${{ matrix.persistence }}-${{ matrix.architecture }}"
           mkdir -p "$work_dir"
           cd "$work_dir"
 
-          dotnet "$cli_dll" new api SmokeApi --adapter "${{ matrix.adapter }}" --persistence "${{ matrix.persistence }}"
+          dotnet "$cli_dll" new api SmokeApi --adapter "${{ matrix.adapter }}" --persistence "${{ matrix.persistence }}" --architecture "${{ matrix.architecture }}"
           cd SmokeApi
+
+          # A fresh scaffold must compile before the first `generate` run.
+          dotnet build SmokeApi.slnx --configuration Release
 
           dotnet "$cli_dll" add feature Todos
           dotnet "$cli_dll" add entity Todos TodoItem --field Title:string --field IsDone:bool --rule "Title:NotEmpty()"

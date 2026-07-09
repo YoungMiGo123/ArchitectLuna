@@ -8,12 +8,17 @@ namespace ArchitectLuna.Persistence.Marten;
 /// Marten persistence for entity-backed CRUD handlers. Marten is a Postgres-native document
 /// database, so there is no separate mapping/configuration step and no DbContext-equivalent
 /// aggregate file — each entity is just a plain POCO document class with a Guid "Id" property,
-/// which Marten auto-detects as the document identity.
+/// which Marten auto-detects as the document identity. Document classes go under
+/// <see cref="GenerationContext.Domain"/>/Documents; for vertical slice that's a "Persistence"
+/// subfolder of the API project (byte-identical to pre-multi-root output), for Clean Architecture
+/// it's the Domain project itself.
 ///
 /// Handler bodies get an <c>IDocumentSession</c> injected (MediatR via constructor, Wolverine via
 /// an extra static-method parameter) and do straightforward Store/Load/Delete/Query calls — no
 /// repository layer, matching the tool's "simplistic" generated-code philosophy. IDocumentSession
 /// also implements IQuerySession, so the same single dependency covers both commands and queries.
+/// It's already an interface owned by Marten, so unlike EF Core's DbContext there's no need to
+/// generate an abstraction for Clean Architecture's Application→Infrastructure dependency rule.
 /// </summary>
 public sealed class MartenPersistenceGenerator : IPersistenceGenerator
 {
@@ -21,11 +26,16 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
 
     public IReadOnlyList<string> RequiredPackages { get; } = new[] { "Marten" };
 
+    // Handler bodies (session.Store/Load/Query/SaveChangesAsync, IDocumentSession) live in the
+    // Application project, so it needs the same single package Infrastructure does — Marten has no
+    // separate "abstractions-only" package the way EF Core does.
+    public IReadOnlyList<string> ApplicationRequiredPackages { get; } = new[] { "Marten" };
+
     public IReadOnlyList<string> ProgramCsUsings { get; } = new[] { "Marten" };
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
     {
-        var documentPath = $"{context.ProjectRelativeRoot}/Persistence/Documents/{entity.Name}.cs";
+        var documentPath = $"{context.Domain.ProjectRoot}/Documents/{entity.Name}.cs";
         return new[] { new GeneratedFile(documentPath, RenderDocumentClass(context, entity)) };
     }
 
@@ -58,7 +68,7 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         return new HandlerBinding(body, "IDocumentSession", "session", HandlerUsings(context));
     }
 
-    public IReadOnlyList<string> BuildProgramCsRegistration(string solutionName)
+    public IReadOnlyList<string> BuildProgramCsRegistration(GenerationContext context)
     {
         return new[]
         {
@@ -68,14 +78,14 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
 
     private static List<string> HandlerUsings(GenerationContext context) => new()
     {
-        $"{context.RootNamespace}.Persistence.Documents",
+        $"{context.Domain.RootNamespace}.Documents",
         "Marten",
     };
 
     private static string RenderDocumentClass(GenerationContext context, EntityModel entity)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"namespace {context.RootNamespace}.Persistence.Documents;");
+        sb.AppendLine($"namespace {context.Domain.RootNamespace}.Documents;");
         sb.AppendLine();
         sb.AppendLine($"public sealed class {entity.Name}");
         sb.AppendLine("{");

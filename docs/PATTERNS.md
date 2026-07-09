@@ -1,22 +1,36 @@
 # Generated code shape
 
-ArchitectLuna generates one style: a **vertical slice per command/query**, inside a single
-ASP.NET Core minimal-API project. There is no Clean Architecture layer split (Domain/Application/
-Infrastructure/Api projects) yet — see `docs/ROADMAP.md` for where that and other patterns fit.
+ArchitectLuna generates one command/query shape — a vertical slice per command/query, always
+rendered through the same `Templates/Shared` endpoint/validator templates — but two interchangeable
+**layouts** for where those slices land on disk: `--architecture vertical-slice` (default, one Api
+project) and `--architecture clean-architecture` (Api/Application/Domain/Infrastructure as four
+real projects). Everything else in this document (entity-driven CRUD, protected regions, adapter/
+persistence parity) is identical regardless of layout.
 
-## Solution shape (`new api`)
+## Solution shape (`new api`) — vertical slice
 
 ```
 {Solution}/
   {Solution}.slnx
+  Directory.Build.props   # shared TargetFramework/ImplicitUsings/Nullable for every project
+  Dockerfile
+  docker-compose.yml       # + a `db` service when --persistence is configured
   .architect/
     model.yaml          # the Intent Model
     manifest.json        # every path ever generated, for future cleanup tooling
   src/{Solution}.Api/
     {Solution}.Api.csproj
-    Program.cs            # adapter bootstrap + reflection-based IEndpointDefinition mapping
+    Program.cs            # adapter bootstrap, Swagger/health-checks/logging, reflection-based IEndpointDefinition mapping
+    Properties/launchSettings.json
+    appsettings.json               # no secrets — Logging/Serilog config only
+    appsettings.Development.json   # local dev connection string, when persistence is configured
     Common/
       IEndpointDefinition.cs
+      ExceptionHandlingMiddleware.cs   # KeyNotFoundException -> 404, else -> 500, as problem+json
+    Persistence/                       # only when --persistence isn't `none`
+      Entities/{Entity}.cs             # (or Documents/{Entity}.cs for Marten)
+      Configurations/{Entity}Configuration.cs   # EF Core only
+      {Solution}DbContext.cs                    # EF Core only
     Features/
       {Feature}/
         {Command}/
@@ -28,11 +42,55 @@ Infrastructure/Api projects) yet — see `docs/ROADMAP.md` for where that and ot
           {Query}Query.cs
           {Query}Handler.cs
           {Query}Endpoint.cs
+  tests/{Solution}.Api.Tests/
+    {Solution}.Api.Tests.csproj
+    HealthCheckTests.cs      # WebApplicationFactory<Program> smoke test against /health
+```
+
+## Solution shape (`new api --architecture clean-architecture`)
+
+Same per-command/query file shape, split across four real projects with the dependency rule
+pointing inward (`Api`/`Infrastructure` → `Application` → `Domain`):
+
+```
+{Solution}/
+  {Solution}.slnx
+  Directory.Build.props
+  Dockerfile
+  docker-compose.yml
+  .architect/
+  src/
+    {Solution}.Domain/                      # no project references, no packages
+      Entities/{Entity}.cs
+    {Solution}.Application/                 # references Domain; MediatR/Wolverine + FluentValidation
+      ApplicationAssemblyMarker.cs          # anchor type for Program.cs's assembly-scanning registration
+      Persistence/I{Solution}DbContext.cs   # EF Core only, DbSet<T> per entity — Application owns this
+                                             # abstraction so it never needs to reference Infrastructure
+      Features/{Feature}/{Command Or Query}/
+        ...Command.cs / ...Query.cs, ...Handler.cs, ...Validator.cs
+    {Solution}.Infrastructure/              # references Application + Domain; EF Core/Marten packages
+      Configurations/{Entity}Configuration.cs
+      {Solution}DbContext.cs                # implements I{Solution}DbContext
+    {Solution}.Api/                         # references Application + Infrastructure (composition root)
+      {Solution}.Api.csproj
+      Program.cs
+      Properties/launchSettings.json
+      appsettings*.json
+      Common/
+        IEndpointDefinition.cs
+        ExceptionHandlingMiddleware.cs
+      Features/{Feature}/{Command Or Query}/
+        ...Endpoint.cs
+  tests/
+    {Solution}.Application.Tests/
+    {Solution}.Api.Tests/
 ```
 
 `Program.cs` is written once by `new api` and never needs to be regenerated: it discovers every
 `IEndpointDefinition` in the assembly by reflection and maps it, so adding a new feature/entity
-never touches it.
+never touches it. Under Clean Architecture it also scans the Application assembly (via
+`ApplicationAssemblyMarker`) for MediatR/Wolverine handlers and FluentValidation validators, since
+those live in a different project than `Program.cs` itself.
 
 ## Entity-driven CRUD (`add entity`)
 
@@ -113,20 +171,25 @@ sees.
 
 ## Persistence provider parity
 
-EF Core (`efcore-postgres`/`efcore-sqlserver`) and Marten (`marten`) both implement
-`IPersistenceGenerator` and both use the same message-field-in / entity-field-out naming
+In-Memory (`in-memory`), EF Core (`efcore-postgres`/`efcore-sqlserver`), and Marten (`marten`) all
+implement `IPersistenceGenerator` and all use the same message-field-in / entity-field-out naming
 convention in generated handler bodies (`message.{Field}` for input, `entity.{Field}` for output,
 `entity`/`entities` as local variable names, `KeyNotFoundException` with the same message format
-for a missing Update/GetById target) — but their storage shape differs, because the two databases
-are genuinely different:
+for a missing Update/GetById target) — but their storage shape differs:
 
-| | EF Core | Marten |
-|---|---|---|
-| Per-entity file | domain class + `IEntityTypeConfiguration<T>` | plain document class only (Marten auto-detects `Guid Id` as the document identity, no separate config needed) |
-| Solution-level file | one `DbContext` with a `DbSet<T>` per entity | none — nothing aggregates across entities |
-| Injected dependency | the generated `DbContext` | `IDocumentSession` (covers both reads and writes, since it also implements `IQuerySession`) |
-| Write | `Add`/`Remove` + `SaveChangesAsync` | `Store`/`Delete` + `SaveChangesAsync` |
-| Read | `FirstOrDefaultAsync`/`ToListAsync` (`AsNoTracking()`) | `LoadAsync`/`Query<T>().ToListAsync()` |
+| | In-Memory | EF Core | Marten |
+|---|---|---|---|
+| Per-entity file | plain POCO class only | domain class + `IEntityTypeConfiguration<T>` | plain document class only (Marten auto-detects `Guid Id` as the document identity, no separate config needed) |
+| Solution-level file | one `InMemoryStore` shared by every entity | one `DbContext` with a `DbSet<T>` per entity | none — nothing aggregates across entities |
+| Injected dependency | the generated `InMemoryStore` (registered as a singleton) | the generated `DbContext` | `IDocumentSession` (covers both reads and writes, since it also implements `IQuerySession`) |
+| Write | `Save`/`Remove` (dictionary keyed by entity type + id) | `Add`/`Remove` + `SaveChangesAsync` | `Store`/`Delete` + `SaveChangesAsync` |
+| Read | `Find`/`GetAll` | `FirstOrDefaultAsync`/`ToListAsync` (`AsNoTracking()`) | `LoadAsync`/`Query<T>().ToListAsync()` |
+| External dependency | none — no NuGet package, no connection string, no database process | Postgres or SQL Server must be reachable at runtime | Postgres (Marten is Postgres-native) must be reachable at runtime |
+| Durability | process lifetime only — reset on restart | durable | durable |
 
-Like the messaging adapters, switching `--persistence` never changes a command/query's route, only
-how its handler talks to storage.
+In-Memory is the `new api` default specifically because it has no external dependency: a freshly
+scaffolded solution has real, runnable CRUD without a database to stand up first. Switching to a
+durable provider later is a `--persistence` model change, not a rewrite — the entity shape and
+handler call sites look the same, only the injected dependency and its backing store differ. Like
+the messaging adapters, switching `--persistence` never changes a command/query's route, only how
+its handler talks to storage.

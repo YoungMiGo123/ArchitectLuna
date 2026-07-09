@@ -26,11 +26,15 @@ public sealed class GeneratedSolutionBuildTests
     [Theory]
     [Trait("Category", "EndToEnd")]
     [InlineData("mediatr", "none")]
+    [InlineData("mediatr", "in-memory")]
     [InlineData("mediatr", "efcore-postgres")]
     [InlineData("mediatr", "efcore-sqlserver")]
+    [InlineData("mediatr", "marten")]
     [InlineData("wolverine", "none")]
+    [InlineData("wolverine", "in-memory")]
     [InlineData("wolverine", "efcore-postgres")]
     [InlineData("wolverine", "efcore-sqlserver")]
+    [InlineData("wolverine", "marten")]
     public void GeneratedSolution_Compiles_And_MatchesKnownGoodRegressions(string adapter, string persistence)
     {
         var cliDllPath = CliLocator.ResolveCliDllPath();

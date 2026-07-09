@@ -22,5 +22,10 @@ public sealed class ArchitectModel
     /// </summary>
     public PersistenceProvider Persistence { get; init; } = PersistenceProvider.None;
 
+    /// <summary>
+    /// Output shape. Defaults to VerticalSlice, preserving the original single-project behavior.
+    /// </summary>
+    public SolutionLayout Layout { get; init; } = SolutionLayout.VerticalSlice;
+
     public List<FeatureModel> Features { get; init; } = new();
 }

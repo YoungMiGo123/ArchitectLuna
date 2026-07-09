@@ -1,6 +1,7 @@
 using ArchitectLuna.Cli.Adapters;
 using ArchitectLuna.Core.Generation;
 using ArchitectLuna.Core.Manifest;
+using ArchitectLuna.Core.Model;
 using ArchitectLuna.Core.Validation;
 using ArchitectLuna.Core.Workspace;
 using ArchitectLuna.Core.Yaml;
@@ -36,7 +37,14 @@ public sealed class GenerateCommand : Command<GenerateCommandSettings>
 
         var persistence = PersistenceRegistry.Resolve(model.Persistence);
         var adapter = AdapterRegistry.Resolve(model.Adapter, persistence);
-        var generationContext = new GenerationContext(model.Namespace, $"src/{model.SolutionName}.Api");
+        var generationContext = model.Layout == SolutionLayout.CleanArchitecture
+            ? GenerationContext.ForCleanArchitecture(
+                model.Namespace,
+                $"src/{model.SolutionName}.Api",
+                $"src/{model.SolutionName}.Application",
+                $"src/{model.SolutionName}.Domain",
+                $"src/{model.SolutionName}.Infrastructure")
+            : GenerationContext.ForVerticalSlice(model.Namespace, $"src/{model.SolutionName}.Api");
         var manifest = ManifestStore.Load(manifestPath);
 
         var fileCount = 0;

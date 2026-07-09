@@ -18,6 +18,11 @@ namespace ArchitectLuna.Adapters.Wolverine;
 /// marker interface; a persistence dependency (if any) is passed as an extra static-method
 /// parameter, which is Wolverine's own convention for method injection.
 ///
+/// Message/Handler/Validator files go to <see cref="GenerationContext.Application"/>; Endpoint
+/// files go to <see cref="GenerationContext.Api"/>. For vertical slice these are the same project,
+/// so nothing changes there; for Clean Architecture they're genuinely separate projects and the
+/// endpoint gets an extra "using" for the Application namespace.
+///
 /// Handler bodies come from the configured <see cref="IPersistenceGenerator"/> — defaults to
 /// <see cref="NullPersistenceGenerator"/> (the original NotImplementedException placeholder) when
 /// none is supplied, so existing callers are unaffected.
@@ -54,8 +59,10 @@ public sealed class WolverineAdapter : IFrameworkAdapter
         var validatorName = $"{command.Name}Validator";
         var endpointName = $"{command.Name}Endpoint";
         var resultName = $"{command.Name}Result";
-        var ns = $"{context.RootNamespace}.Features.{feature.Name}.{command.Name}";
-        var slicePath = $"{context.ProjectRelativeRoot}/Features/{feature.Name}/{command.Name}";
+        var ns = $"{context.Application.RootNamespace}.Features.{feature.Name}.{command.Name}";
+        var slicePath = $"{context.Application.ProjectRoot}/Features/{feature.Name}/{command.Name}";
+        var endpointNs = $"{context.Api.RootNamespace}.Features.{feature.Name}.{command.Name}";
+        var endpointPath = $"{context.Api.ProjectRoot}/Features/{feature.Name}/{command.Name}";
         var route = RouteInference.CommandRoute(feature, command);
 
         var fields = command.Fields.Select(f => new MessageFieldRenderModel { Name = f.Name, Type = f.Type }).ToList();
@@ -66,7 +73,6 @@ public sealed class WolverineAdapter : IFrameworkAdapter
         var messageModel = new MessageRenderModel
         {
             Namespace = ns,
-            RootNamespace = context.RootNamespace,
             MessageName = messageName,
             HandlerName = handlerName,
             ResultName = resultName,
@@ -98,8 +104,9 @@ public sealed class WolverineAdapter : IFrameworkAdapter
 
         var endpointModel = new CommandEndpointRenderModel
         {
-            Namespace = ns,
-            RootNamespace = context.RootNamespace,
+            Namespace = endpointNs,
+            ApiRootNamespace = context.Api.RootNamespace,
+            MessageNamespace = ns,
             MessageName = messageName,
             EndpointName = endpointName,
             ResultType = resultName,
@@ -131,7 +138,7 @@ public sealed class WolverineAdapter : IFrameworkAdapter
             files.Add(new GeneratedFile($"{slicePath}/{validatorName}.cs", RenderShared("Validator.cs.sbn", validatorModel)));
         }
 
-        files.Add(new GeneratedFile($"{slicePath}/{endpointName}.cs", RenderShared("CommandEndpoint.cs.sbn", endpointModel)));
+        files.Add(new GeneratedFile($"{endpointPath}/{endpointName}.cs", RenderShared("CommandEndpoint.cs.sbn", endpointModel)));
 
         return files;
     }
@@ -142,8 +149,10 @@ public sealed class WolverineAdapter : IFrameworkAdapter
         var handlerName = $"{query.Name}Handler";
         var endpointName = $"{query.Name}Endpoint";
         var resultName = $"{query.Name}Result";
-        var ns = $"{context.RootNamespace}.Features.{feature.Name}.{query.Name}";
-        var slicePath = $"{context.ProjectRelativeRoot}/Features/{feature.Name}/{query.Name}";
+        var ns = $"{context.Application.RootNamespace}.Features.{feature.Name}.{query.Name}";
+        var slicePath = $"{context.Application.ProjectRoot}/Features/{feature.Name}/{query.Name}";
+        var endpointNs = $"{context.Api.RootNamespace}.Features.{feature.Name}.{query.Name}";
+        var endpointPath = $"{context.Api.ProjectRoot}/Features/{feature.Name}/{query.Name}";
         var route = RouteInference.QueryRoute(feature, query);
 
         var parameters = query.Params.Select(p => new MessageFieldRenderModel { Name = p.Name, Type = p.Type }).ToList();
@@ -158,7 +167,6 @@ public sealed class WolverineAdapter : IFrameworkAdapter
         var messageModel = new MessageRenderModel
         {
             Namespace = ns,
-            RootNamespace = context.RootNamespace,
             MessageName = messageName,
             HandlerName = handlerName,
             ResultName = resultName,
@@ -184,8 +192,9 @@ public sealed class WolverineAdapter : IFrameworkAdapter
 
         var endpointModel = new QueryEndpointRenderModel
         {
-            Namespace = ns,
-            RootNamespace = context.RootNamespace,
+            Namespace = endpointNs,
+            ApiRootNamespace = context.Api.RootNamespace,
+            MessageNamespace = ns,
             MessageName = messageName,
             EndpointName = endpointName,
             ResultType = resultType,
@@ -205,7 +214,7 @@ public sealed class WolverineAdapter : IFrameworkAdapter
         {
             new GeneratedFile($"{slicePath}/{messageName}.cs", RenderAdapter("Message.cs.sbn", messageModel)),
             new GeneratedFile($"{slicePath}/{handlerName}.cs", RenderAdapter("Handler.cs.sbn", messageModel)),
-            new GeneratedFile($"{slicePath}/{endpointName}.cs", RenderShared("QueryEndpoint.cs.sbn", endpointModel)),
+            new GeneratedFile($"{endpointPath}/{endpointName}.cs", RenderShared("QueryEndpoint.cs.sbn", endpointModel)),
         };
     }
 
