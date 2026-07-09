@@ -76,6 +76,27 @@
   `appsettings.Development.json` split (base file has no secrets; the dev connection string lives
   only in the gitignorable Development file).
 
+- **Production foundation + three-tier testing layer** (plan:
+  `docs/plans/001-production-foundation-and-testing-layer.md`; requirements:
+  `docs/requirements/001-implementation-architecture.md` + `002-testing-layer.md`). Every scaffold
+  now ships the Result pattern (`Result`/`Result<T>`/`Error`/`ValidationError`/`PagedResult<T>` —
+  handlers return results, endpoints map them to 201/200/204 + 400/404/409/401/403/500 via one
+  `ToProblem()` extension), `BaseEntity` (inherited by every generated entity/document),
+  `IUserContext`/`IDateTimeProvider` abstractions with HTTP/system implementations, correlation-ID
+  + exception middleware, Serilog request logging, and a Request/Response DTO + extension-method
+  mapping layer per slice. Startup is the clean extension shape (`UseApiLogging`, `AddApi`/
+  `AddApplication`/`AddInfrastructure`, `UseApiMiddleware`, `MapApiEndpoints`) built by
+  `FoundationFiles`/`ProgramCsBuilder`; `IPersistenceGenerator` registration moved from Program.cs
+  splicing to the generated `AddInfrastructure`. Clean Architecture gained a fifth `Contracts`
+  project (and became the `new api` default per the requirement doc); ordering rules moved to
+  `Core/Editing/ModelEditor` with a new `add crud` verb. Testing is now three tiers: categorized
+  `Core.Tests`, an in-memory `Template.Tests` snapshot project (foundation presence, Program.cs
+  shape, slice file sets, layer-leak checks — milliseconds, no I/O), and an expanded E2E suite
+  (ordering error paths through the real CLI, widened clean-architecture matrix, and a `dotnet
+  test` run of a generated solution's own test suite — which immediately caught that core
+  WolverineFx stopped shipping its runtime compiler: generated Wolverine apps compiled but threw
+  at startup; fixed via `WolverineFx.RuntimeCompilation` + `opts.UseRuntimeCompilation()`).
+
 ## Near-term — get to a demoable prototype
 
 - **`invero doctor` / `--verify`.** Run `dotnet build` after `generate` and map errors back to the

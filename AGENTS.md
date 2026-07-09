@@ -28,11 +28,14 @@ into vertical-slice APIs through two seams — `IFrameworkAdapter` (MediatR/Wolv
 ## Build & test
 
 ```bash
-dotnet build ArchitectLuna.sln                 # always
-dotnet test tests/ArchitectLuna.Core.Tests     # fast suite — Core/naming/model/merge changes
-dotnet test ArchitectLuna.sln                  # full incl. slow E2E (scaffolds + builds real
-                                               # solutions across adapter × persistence matrix)
-                                               # — required for template/adapter/provider/CLI changes
+dotnet build ArchitectLuna.sln                    # always
+dotnet test tests/ArchitectLuna.Core.Tests        # fast suite — Core/naming/model/merge changes
+dotnet test tests/ArchitectLuna.Template.Tests    # fast in-memory snapshot suite — any change to
+                                                  # generated-output shape (templates, adapters,
+                                                  # foundation files, Program.cs)
+dotnet test ArchitectLuna.sln                     # full incl. slow E2E (scaffolds + builds real
+                                                  # solutions across adapter × persistence matrix)
+                                                  # — required for template/adapter/provider/CLI changes
 ```
 
 Targets .NET 10. E2E tests shell out to the real `dotnet` CLI.

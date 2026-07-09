@@ -7,8 +7,8 @@ on:
   pull_request:
 
 jobs:
-  build-and-test:
-    name: Build & Test
+  build-and-unit-test:
+    name: Build & fast tests (Core + Template)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -26,23 +26,41 @@ jobs:
       - name: Build
         run: dotnet build ArchitectLuna.sln --no-restore --configuration Release
 
-      # Run against the whole solution (rather than naming ArchitectLuna.Core.Tests.csproj
-      # directly) so that tests/ArchitectLuna.EndToEnd.Tests picks up automatically the moment a
-      # parallel workstream wires it into ArchitectLuna.sln, with no follow-up edit to this
-      # workflow required. Tradeoff: the end-to-end suite is described as slow (it does a real
-      # dotnet build per test), so once it lands this single job will slow down on every push/PR.
-      # That's an acceptable default for now (today it's identical in cost to naming
-      # ArchitectLuna.Core.Tests.csproj directly, since that's the only test project that
-      # exists); if/when the end-to-end suite meaningfully slows CI down, the integrator should
-      # split this into a fast unit-test job that still runs on every push/PR and a slower
-      # end-to-end job (e.g. gated to pull_request only, or a separate scheduled workflow).
-      - name: Test
-        run: dotnet test ArchitectLuna.sln --no-build --configuration Release
+      - name: Core unit tests
+        run: dotnet test tests/ArchitectLuna.Core.Tests --no-build --configuration Release
+
+      - name: Template snapshot tests
+        run: dotnet test tests/ArchitectLuna.Template.Tests --no-build --configuration Release
+
+  e2e-tests:
+    name: End-to-end tests (scaffold + generate + build real solutions)
+    runs-on: ubuntu-latest
+    # Each E2E case scaffolds a real solution (live NuGet package adds) and compiles it, so this
+    # tier is minutes-per-test by design — hence its own job with a generous timeout instead of
+    # slowing the fast tier on every push.
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore ArchitectLuna.sln
+
+      - name: Build
+        run: dotnet build ArchitectLuna.sln --no-restore --configuration Release
+
+      - name: End-to-end tests
+        run: dotnet test tests/ArchitectLuna.EndToEnd.Tests --no-build --configuration Release
 
   e2e-smoke:
     name: CLI smoke (${{ matrix.adapter }} / ${{ matrix.persistence }} / ${{ matrix.architecture }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -82,3 +100,14 @@ jobs:
           dotnet "$cli_dll" generate
 
           dotnet build SmokeApi.slnx --configuration Release
+
+      # For one representative combination the generated solution's own test suite runs too —
+      # its WebApplicationFactory health test boots the app for real, which catches startup-only
+      # failures a successful compile can't (e.g. Wolverine's runtime-compilation requirement).
+      - name: dotnet test on the generated solution (representative combination)
+        if: matrix.adapter == 'wolverine' && matrix.persistence == 'in-memory' && matrix.architecture == 'clean-architecture'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/smoke-${{ matrix.adapter }}-${{ matrix.persistence }}-${{ matrix.architecture }}/SmokeApi"
+          dotnet test SmokeApi.slnx --configuration Release

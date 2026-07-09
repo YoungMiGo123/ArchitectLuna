@@ -107,7 +107,8 @@ Run checks proportional to what was touched:
 |---|---|
 | Anything | `dotnet build ArchitectLuna.sln` |
 | Core / naming / model / merge logic | `dotnet test tests/ArchitectLuna.Core.Tests` |
-| Templates, adapters, persistence, CLI, generated-output shape | `dotnet test ArchitectLuna.sln` (includes the E2E suite that scaffolds, generates, and builds real solutions across the adapter × persistence matrix) |
+| Generated-output shape (templates, adapters, foundation files, Program.cs) — fast check while iterating | `dotnet test tests/ArchitectLuna.Template.Tests` (in-memory snapshot tier, sub-second) |
+| Templates, adapters, persistence, CLI, generated-output shape — before delivering | `dotnet test ArchitectLuna.sln` (includes the E2E suite that scaffolds, generates, and builds real solutions across the adapter × persistence matrix, plus a `dotnet test` of a generated solution's own test suite) |
 | UI | `dotnet build` + manual smoke: `dotnet run --project src/ArchitectLuna.Ui` |
 
 Then deliver:
