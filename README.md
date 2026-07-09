@@ -46,6 +46,23 @@ One `add entity` call gives you a full Create/Read/Update/Delete/List slice. You
 bespoke commands/queries beyond CRUD with `add command` / `add query` when you need something an
 entity's standard shape doesn't cover.
 
+## Platform support
+
+ArchitectLuna is a plain .NET 10 global tool (`Microsoft.NET.Sdk`, no OS-specific dependency,
+no P/Invoke) — everything in this README works identically on **Windows, macOS, and Linux**, as
+long as the [.NET 10 SDK](https://dotnet.microsoft.com/download) is installed. The only things
+that differ by OS are the *shell syntax* (this README's examples use bash; on Windows use
+PowerShell, noted inline below where it matters) and *where `~/.dotnet/tools` lives*:
+
+| OS | Global tools folder | Add to `PATH` (if the installer didn't already) |
+|---|---|---|
+| macOS / Linux | `~/.dotnet/tools` | `export PATH="$PATH:$HOME/.dotnet/tools"` in `~/.bashrc`/`~/.zshrc` |
+| Windows | `%USERPROFILE%\.dotnet\tools` | PowerShell: `[Environment]::SetEnvironmentVariable("PATH", "$env:PATH;$env:USERPROFILE\.dotnet\tools", "User")`, then open a new terminal |
+
+Generated solutions are equally cross-platform: plain ASP.NET Core + EF Core/Marten/MediatR/
+Wolverine, a `Dockerfile`/`docker-compose.yml` that work with Docker Desktop on any OS, and no
+generated code path assumes a particular shell or filesystem separator.
+
 ## Installing
 
 `ArchitectLuna.Cli.csproj` is already set up as a [.NET tool](https://learn.microsoft.com/dotnet/core/tools/global-tools)
@@ -56,7 +73,7 @@ and installing it globally makes `architect-luna` a normal command on your `PATH
 ### 1. Package it as a NuGet tool (`dotnet pack`)
 
 ```bash
-# From the repo root
+# From the repo root — identical on Windows (PowerShell/cmd), macOS, and Linux
 dotnet pack src/ArchitectLuna.Cli/ArchitectLuna.Cli.csproj -c Release -o ./nupkg
 ```
 
@@ -74,7 +91,7 @@ no separate publish step is required to produce the package.
 dotnet tool install --global --add-source ./nupkg architect-luna
 ```
 
-**From a published feed** (see step 3) — once the package is on GitHub Packages, NuGet.org, or any
+**From a published feed** (see step 5) — once the package is on GitHub Packages, NuGet.org, or any
 other feed, anyone can install it without cloning this repo at all:
 
 ```bash
@@ -83,14 +100,14 @@ dotnet tool install --global architect-luna --add-source <your-feed-url>
 dotnet tool install --global architect-luna
 ```
 
-Either way, `dotnet tool install --global` puts the command on `~/.dotnet/tools`, which needs to be
-on your shell's `PATH` (the installer prints the one-liner to add it if it isn't already — usually
-`export PATH="$PATH:$HOME/.dotnet/tools"` in your shell profile).
+Both commands are identical on Windows/macOS/Linux. Either way, `dotnet tool install --global`
+puts the command on your global tools folder (see the "Platform support" table above for where
+that is per OS and how to add it to `PATH` if the .NET SDK installer hasn't already).
 
 ### 3. Run it on any project folder
 
 Once installed, `architect-luna` behaves like any other global CLI — no relative paths, no `dotnet
-run --project ...`, no reference to this repo's checkout at all:
+run --project ...`, no reference to this repo's checkout at all. Same commands on every OS:
 
 ```bash
 cd ~/anywhere/you/want/a/new/api        # or an existing folder for `add feature`/`add entity`/`generate`
@@ -102,10 +119,50 @@ architect-luna generate
 dotnet build && dotnet run --project src/MyApp.Api
 ```
 
+(On Windows PowerShell, replace `&&` with `;` — everything else is unchanged: `dotnet build; dotnet run --project src/MyApp.Api`.)
+
 `new api` defaults to `--persistence in-memory`, so the `dotnet run` above serves a fully working
 CRUD API immediately — no database to stand up first (see "The core idea" above).
 
-### 4. Publish to a real feed (optional — lets teammates/CI skip the checkout)
+### 4. Updating — the easy way
+
+Whenever this repo (or your fork) changes, one command re-packs and re-installs the latest CLI
+build in place:
+
+```bash
+dotnet pack src/ArchitectLuna.Cli/ArchitectLuna.Cli.csproj -c Release -o ./nupkg && \
+  dotnet tool update --global --add-source ./nupkg architect-luna
+```
+
+```powershell
+# Windows PowerShell equivalent
+dotnet pack src/ArchitectLuna.Cli/ArchitectLuna.Cli.csproj -c Release -o ./nupkg; `
+  dotnet tool update --global --add-source ./nupkg architect-luna
+```
+
+`dotnet tool update` only actually reinstalls when it sees a *newer* version, so bump `<Version>`
+in `ArchitectLuna.Cli.csproj` before running this if you want it to pick up a same-day rebuild —
+otherwise it's a safe no-op. If you don't want to think about version bumps at all, the
+always-works fallback is uninstall-then-reinstall, which reruns regardless of version:
+
+```bash
+dotnet tool uninstall --global architect-luna
+dotnet pack src/ArchitectLuna.Cli/ArchitectLuna.Cli.csproj -c Release -o ./nupkg
+dotnet tool install --global --add-source ./nupkg architect-luna
+```
+
+From a published feed instead of a local pack, updating is just:
+
+```bash
+dotnet tool update --global architect-luna
+```
+
+Other useful commands (same on every OS):
+
+- **Check what's installed and where:** `dotnet tool list --global`
+- **Uninstall entirely:** `dotnet tool uninstall --global architect-luna`
+
+### 5. Publish to a real feed (optional — lets teammates/CI skip the checkout)
 
 To make the package installable on *other* machines without them needing this repo checked out at
 all, push it to a feed:
@@ -113,30 +170,18 @@ all, push it to a feed:
 - **[GitHub Packages](https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-nuget-registry)**
   — natural fit since this repo is already on GitHub:
   ```bash
-  dotnet nuget push ./nupkg/architect-luna.0.1.0.nupkg \
-    --source https://nuget.pkg.github.com/YoungMiGo123/index.json \
-    --api-key <a GitHub PAT with write:packages scope>
+  dotnet nuget push ./nupkg/architect-luna.0.1.0.nupkg --source https://nuget.pkg.github.com/YoungMiGo123/index.json --api-key <a GitHub PAT with write:packages scope>
   ```
 - **[NuGet.org](https://www.nuget.org/)** — for public distribution:
   ```bash
-  dotnet nuget push ./nupkg/architect-luna.0.1.0.nupkg \
-    --source https://api.nuget.org/v3/index.json \
-    --api-key <your NuGet.org API key>
+  dotnet nuget push ./nupkg/architect-luna.0.1.0.nupkg --source https://api.nuget.org/v3/index.json --api-key <your NuGet.org API key>
   ```
+
+  (Both shown as single lines so they paste cleanly into PowerShell/cmd too — bash users can still
+  split them across lines with a trailing `\` if preferred.)
 
 After that, anyone with the feed configured (`dotnet nuget add source ...` or a `nuget.config`)
 just runs `dotnet tool install --global architect-luna` — no `git clone`, no local `dotnet pack`.
-
-### Updating / uninstalling
-
-- **Pick up code changes after pulling a newer version of this repo:**
-  `dotnet tool update --global --add-source ./nupkg architect-luna` after re-running `dotnet pack`
-  (bump `<Version>` in `ArchitectLuna.Cli.csproj` first if you want `dotnet tool update` to see it
-  as newer — otherwise `dotnet tool uninstall --global architect-luna` then re-install is the
-  reliable path for a same-version rebuild).
-- **From a published feed:** `dotnet tool update --global architect-luna`.
-- **Uninstall entirely:** `dotnet tool uninstall --global architect-luna`.
-- **Check what's installed and where:** `dotnet tool list --global`.
 
 ## Quick start
 
