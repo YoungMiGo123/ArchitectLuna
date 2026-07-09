@@ -21,6 +21,14 @@ public sealed class QueryModel
     public bool IsCollection { get; init; }
 
     /// <summary>
+    /// True for a paged list query (synthesized GetAll): the result is wrapped as
+    /// PagedResult&lt;TResult&gt; instead of a bare list, the message carries Page/PageSize, and
+    /// the endpoint binds <c>?page=&amp;pageSize=</c> from the query string. Implies
+    /// <see cref="IsCollection"/>.
+    /// </summary>
+    public bool IsPaged { get; init; }
+
+    /// <summary>
     /// Explicit route override. Null means the adapter infers a default route.
     /// </summary>
     public string? Route { get; init; }

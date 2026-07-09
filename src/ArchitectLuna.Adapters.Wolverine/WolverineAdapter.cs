@@ -213,9 +213,11 @@ public sealed class WolverineAdapter : IFrameworkAdapter
             ? query.ResultFields.Select(f => new MessageFieldRenderModel { Name = f.Name, Type = f.Type }).ToList()
             : parameters;
 
-        var wrappedResultType = query.IsCollection
-            ? $"Result<IReadOnlyList<{names.Result}>>"
-            : $"Result<{names.Result}>";
+        var wrappedResultType = query.IsPaged
+            ? $"Result<PagedResult<{names.Result}>>"
+            : query.IsCollection
+                ? $"Result<IReadOnlyList<{names.Result}>>"
+                : $"Result<{names.Result}>";
 
         var binding = BindQuery(context, feature, query);
 
@@ -246,9 +248,11 @@ public sealed class WolverineAdapter : IFrameworkAdapter
                 ? $"{DispatcherParam}.InvokeAsync<{wrappedResultType}>(new {names.Message}(), cancellationToken)"
                 : $"{DispatcherParam}.InvokeAsync<{wrappedResultType}>(query, cancellationToken)";
 
-        var successExpression = query.IsCollection
-            ? "Results.Ok(result.Value.Select(item => item.ToResponse()).ToList())"
-            : "Results.Ok(result.Value.ToResponse())";
+        var successExpression = query.IsPaged
+            ? $"Results.Ok(new PagedResult<{names.Response}>(result.Value.Items.Select(item => item.ToResponse()).ToList(), result.Value.Page, result.Value.PageSize, result.Value.TotalCount))"
+            : query.IsCollection
+                ? "Results.Ok(result.Value.Select(item => item.ToResponse()).ToList())"
+                : "Results.Ok(result.Value.ToResponse())";
 
         var endpointModel = new QueryEndpointRenderModel
         {

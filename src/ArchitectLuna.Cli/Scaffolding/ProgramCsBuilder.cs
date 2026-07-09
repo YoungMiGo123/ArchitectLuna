@@ -35,6 +35,12 @@ public static class ProgramCsBuilder
             // WolverineFx core no longer ships the runtime compiler; without this the app throws
             // at startup (TypeLoadMode.Dynamic with no IAssemblyGenerator registered).
             wolverineHostLines.Add("    opts.UseRuntimeCompilation();");
+            // Let Wolverine resolve a handler's injected persistence dependency (DbContext /
+            // IDocumentSession) from the DI scope. Wolverine 6 defaults this to NotAllowed, which
+            // throws at the first message unless a persistence-specific integration package is wired
+            // in; AlwaysAllowed keeps the messaging and persistence seams orthogonal (the provider
+            // registers a scoped dependency; the handler resolves it) with no extra packages.
+            wolverineHostLines.Add("    opts.ServiceLocationPolicy = JasperFx.CodeGeneration.Model.ServiceLocationPolicy.AlwaysAllowed;");
             if (context.HasSeparateInfrastructure)
             {
                 // Handlers live in the Application assembly, not the Api assembly Wolverine scans

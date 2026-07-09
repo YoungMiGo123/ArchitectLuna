@@ -46,7 +46,7 @@ public static class SolutionScaffolder
         // The production foundation: Result pattern, BaseEntity, abstractions, middleware, and
         // the extension methods Program.cs is built from. Scaffold-time only — `generate` never
         // rewrites these.
-        WriteGeneratedFiles(root, FoundationFiles.BuildAll(context, adapterName, persistence));
+        WriteGeneratedFiles(root, FoundationFiles.BuildAll(context, adapterName));
 
         // So a fresh scaffold compiles before the first `generate`: AddInfrastructure already
         // references the DbContext/store type as soon as persistence is configured, so it must

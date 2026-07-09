@@ -14,13 +14,29 @@ public sealed class NullPersistenceGenerator : IPersistenceGenerator
 
     public IReadOnlyList<string> ApplicationRequiredPackages { get; } = Array.Empty<string>();
 
-    public IReadOnlyList<string> ServiceRegistrationUsings { get; } = Array.Empty<string>();
-
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity) =>
         Array.Empty<GeneratedFile>();
 
     public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities) =>
-        Array.Empty<GeneratedFile>();
+        new[] { new GeneratedFile($"{context.Infrastructure.ProjectRoot}/PersistenceRegistration.cs", RenderNoOpAddPersistence(context)) };
+
+    private static string RenderNoOpAddPersistence(GenerationContext context) =>
+        $$"""
+        using Microsoft.Extensions.Configuration;
+        using Microsoft.Extensions.DependencyInjection;
+
+        namespace {{context.Infrastructure.RootNamespace}};
+
+        /// <summary>
+        /// No persistence configured (--persistence none): handlers hold protected placeholders,
+        /// so there is nothing to register. Present (as a no-op) so AddInfrastructure can call
+        /// AddPersistence unconditionally regardless of the chosen provider.
+        /// </summary>
+        public static class PersistenceRegistration
+        {
+            public static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration configuration) => services;
+        }
+        """;
 
     public HandlerBinding BindCommandHandler(GenerationContext context, FeatureModel feature, EntityModel entity, CommandModel command) =>
         HandlerBinding.NotImplemented();

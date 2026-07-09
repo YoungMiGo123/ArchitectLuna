@@ -44,8 +44,6 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
 
     public IReadOnlyList<string> ApplicationRequiredPackages { get; } = Array.Empty<string>();
 
-    public IReadOnlyList<string> ServiceRegistrationUsings { get; } = Array.Empty<string>();
-
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
     {
         var entityPath = $"{context.Domain.ProjectRoot}/Entities/{entity.Name}.cs";
@@ -55,13 +53,13 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
     public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities)
     {
         // Always emits the store (it's generic — Save<T>/Find<T>/etc. — so it needs no per-entity
-        // content) rather than only once an entity exists: the generated AddInfrastructure
-        // references this type unconditionally as soon as in-memory persistence is configured, so
-        // the freshly scaffolded solution (before the first `generate`) needs it to already exist
-        // and compile.
+        // content) rather than only once an entity exists: the generated AddPersistence references
+        // this type unconditionally as soon as in-memory persistence is configured, so the freshly
+        // scaffolded solution (before the first `generate`) needs it to already exist and compile.
         var files = new List<GeneratedFile>
         {
             new($"{context.Infrastructure.ProjectRoot}/{StoreClassName}.cs", RenderStoreClass(context)),
+            new($"{context.Infrastructure.ProjectRoot}/PersistenceRegistration.cs", RenderAddPersistence(context)),
         };
 
         if (context.HasSeparateInfrastructure)
@@ -93,30 +91,53 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
     {
         var resultName = $"{query.Name}Result";
 
-        var body = query.IsCollection
-            ? RenderGetAllBody(entity, resultName)
-            : RenderGetByIdBody(entity, resultName);
+        var body = query.IsPaged
+            ? RenderGetAllPagedBody(entity, resultName)
+            : query.IsCollection
+                ? RenderGetAllBody(entity, resultName)
+                : RenderGetByIdBody(entity, resultName);
 
         return new HandlerBinding(body, DependencyTypeName(context), "store", HandlerUsings(context));
     }
 
-    public IReadOnlyList<string> BuildServiceRegistration(GenerationContext context)
+    private string RenderAddPersistence(GenerationContext context)
     {
-        // Fully qualified rather than relying on a "using ...;" being present in the generated
-        // AddInfrastructure file — keeps this independent of whichever usings the caller composes.
-        var qualifiedStoreName = $"{context.Infrastructure.RootNamespace}.{StoreClassName}";
         var lines = new List<string>
         {
-            $"services.AddSingleton<{qualifiedStoreName}>();",
+            $"        services.AddSingleton<{StoreClassName}>();",
         };
-
         if (context.HasSeparateInfrastructure)
         {
-            var qualifiedInterfaceName = $"{context.Application.RootNamespace}.Persistence.{StoreInterfaceName}";
-            lines.Add($"services.AddSingleton<{qualifiedInterfaceName}>(sp => sp.GetRequiredService<{qualifiedStoreName}>());");
+            lines.Add($"        services.AddSingleton<{StoreInterfaceName}>(sp => sp.GetRequiredService<{StoreClassName}>());");
         }
 
-        return lines;
+        var usings = new List<string> { "Microsoft.Extensions.Configuration", "Microsoft.Extensions.DependencyInjection" };
+        if (context.HasSeparateInfrastructure)
+        {
+            usings.Add($"{context.Application.RootNamespace}.Persistence");
+        }
+
+        var usingBlock = string.Join("\n", usings.Distinct().Select(u => $"using {u};"));
+        var body = string.Join("\n", lines);
+
+        return $$"""
+        {{usingBlock}}
+
+        namespace {{context.Infrastructure.RootNamespace}};
+
+        /// <summary>
+        /// Registers the in-memory store (a process-lifetime singleton) — no external database, so
+        /// no schema initializer or DB health check is needed. Regenerated on every `generate`.
+        /// </summary>
+        public static class PersistenceRegistration
+        {
+            public static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration configuration)
+            {
+        {{body}}
+                return services;
+            }
+        }
+        """;
     }
 
     private static string DependencyTypeName(GenerationContext context) =>
@@ -279,6 +300,19 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
         var sb = new StringBuilder();
         sb.AppendLine($"var entities = store.GetAll<{entity.Name}>();");
         sb.Append($"return Result<IReadOnlyList<{resultName}>>.Success(entities.Select(entity => new {resultName}({args})).ToList());");
+        return sb.ToString();
+    }
+
+    private static string RenderGetAllPagedBody(EntityModel entity, string resultName)
+    {
+        var args = string.Join(", ", new[] { "entity.Id" }.Concat(entity.Fields.Select(f => $"entity.{f.Name}")));
+        var sb = new StringBuilder();
+        sb.AppendLine("var page = message.Page <= 0 ? 1 : message.Page;");
+        sb.AppendLine("var pageSize = message.PageSize <= 0 ? 20 : Math.Min(message.PageSize, 100);");
+        sb.AppendLine($"var all = store.GetAll<{entity.Name}>();");
+        sb.AppendLine("var totalCount = (long)all.Count;");
+        sb.AppendLine($"var items = all.OrderBy(entity => entity.Id).Skip((page - 1) * pageSize).Take(pageSize).Select(entity => new {resultName}({args})).ToList();");
+        sb.Append($"return Result<PagedResult<{resultName}>>.Success(new PagedResult<{resultName}>(items, page, pageSize, totalCount));");
         return sb.ToString();
     }
 }
