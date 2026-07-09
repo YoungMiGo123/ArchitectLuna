@@ -23,7 +23,7 @@ namespace ArchitectLuna.Cli.Scaffolding;
 /// </summary>
 public static class SolutionScaffolder
 {
-    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "in-memory", SolutionLayout layout = SolutionLayout.CleanArchitecture)
+    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "in-memory", SolutionLayout layout = SolutionLayout.CleanArchitecture, ApiStyle apiStyle = ApiStyle.MinimalApi)
     {
         var root = Path.Combine(parentDirectory, solutionName);
         if (Directory.Exists(root))
@@ -46,7 +46,7 @@ public static class SolutionScaffolder
         // The production foundation: Result pattern, BaseEntity, abstractions, middleware, and
         // the extension methods Program.cs is built from. Scaffold-time only — `generate` never
         // rewrites these.
-        WriteGeneratedFiles(root, FoundationFiles.BuildAll(context, adapterName));
+        WriteGeneratedFiles(root, FoundationFiles.BuildAll(context, adapterName, apiStyle));
 
         // So a fresh scaffold compiles before the first `generate`: AddInfrastructure already
         // references the DbContext/store type as soon as persistence is configured, so it must
@@ -72,6 +72,7 @@ public static class SolutionScaffolder
             Adapter = adapterName,
             Persistence = persistenceProvider,
             Layout = layout,
+            ApiStyle = apiStyle,
             Features = new List<FeatureModel>(),
         };
         ModelSerializer.Save(Path.Combine(root, ".architect", "model.yaml"), model);

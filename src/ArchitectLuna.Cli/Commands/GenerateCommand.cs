@@ -69,7 +69,7 @@ public sealed class GenerateCommand : Command<GenerateCommandSettings>
 
             foreach (var command in feature.Commands)
             {
-                foreach (var file in adapter.GenerateCommand(generationContext, feature, command))
+                foreach (var file in adapter.GenerateCommand(generationContext, feature, command, model.ApiStyle))
                 {
                     FileWriter.Write(root, file, manifest);
                     fileCount++;
@@ -78,7 +78,7 @@ public sealed class GenerateCommand : Command<GenerateCommandSettings>
 
             foreach (var query in feature.Queries)
             {
-                foreach (var file in adapter.GenerateQuery(generationContext, feature, query))
+                foreach (var file in adapter.GenerateQuery(generationContext, feature, query, model.ApiStyle))
                 {
                     FileWriter.Write(root, file, manifest);
                     fileCount++;

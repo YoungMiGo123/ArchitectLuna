@@ -1,4 +1,5 @@
 using ArchitectLuna.Core.Generation;
+using ArchitectLuna.Core.Model;
 
 namespace ArchitectLuna.Cli.Scaffolding;
 
@@ -22,7 +23,7 @@ public static class FoundationFiles
     /// not here: the provider emits it from GenerateSolutionPersistence so it is regenerated with
     /// full entity knowledge; this only wires the stable `AddInfrastructure` that calls into it.
     /// </summary>
-    public static IReadOnlyList<GeneratedFile> BuildAll(GenerationContext context, string adapterName)
+    public static IReadOnlyList<GeneratedFile> BuildAll(GenerationContext context, string adapterName, ApiStyle apiStyle = ApiStyle.MinimalApi)
     {
         var files = new List<GeneratedFile>
         {
@@ -51,11 +52,19 @@ public static class FoundationFiles
             new($"{context.Api.ProjectRoot}/Results/ResultExtensions.cs", BuildResultExtensions(context)),
             new($"{context.Contracts.ProjectRoot}/Common/PagedResponse.cs", BuildPagedResponse(context)),
             new($"{context.Api.ProjectRoot}/Common/MiddlewareExtensions.cs", BuildMiddlewareExtensions(context)),
-            new($"{context.Api.ProjectRoot}/Common/EndpointExtensions.cs", BuildEndpointExtensions(context)),
+            new($"{context.Api.ProjectRoot}/Common/EndpointExtensions.cs", BuildEndpointExtensions(context, apiStyle)),
             new($"{context.Api.ProjectRoot}/Common/LoggingExtensions.cs", BuildLoggingExtensions(context)),
             new($"{context.Api.ProjectRoot}/Services/HttpUserContext.cs", BuildHttpUserContext(context)),
-            new($"{context.Api.ProjectRoot}/ApiDependencyInjection.cs", BuildApiDependencyInjection(context)),
+            new($"{context.Api.ProjectRoot}/ApiDependencyInjection.cs", BuildApiDependencyInjection(context, apiStyle)),
         };
+
+        // Controllers style only: IActionResult-returning mirror of ResultExtensions. Not shipped
+        // for Minimal API solutions — a solution has exactly one api-style, so the Minimal-API-only
+        // ResultExtensions.cs above is the one always emitted, and this one only when needed.
+        if (apiStyle == ApiStyle.Controllers)
+        {
+            files.Add(new($"{context.Api.ProjectRoot}/Results/ResultActionExtensions.cs", BuildResultActionExtensions(context)));
+        }
 
         return files;
     }
@@ -551,6 +560,93 @@ public static class FoundationFiles
         """;
 
     /// <summary>
+    /// The Controllers-style mirror of <see cref="BuildResultExtensions"/> — same success/failure
+    /// mapping (200/201/204 on success; Validation→400, NotFound→404, Conflict→409,
+    /// Unauthorized→401, Forbidden→403, Unexpected→500 on failure), but every method returns
+    /// <see cref="Microsoft.AspNetCore.Mvc.IActionResult"/> instead of <see cref="IResult"/> so
+    /// generated controller actions can return it directly. Only emitted for
+    /// <see cref="ApiStyle.Controllers"/> solutions.
+    /// </summary>
+    public static string BuildResultActionExtensions(GenerationContext context) =>
+        $$"""
+        using Microsoft.AspNetCore.Mvc;
+        using {{context.Application.RootNamespace}}.Common.Results;
+        using {{context.Api.RootNamespace}}.Responses;
+
+        namespace {{context.Api.RootNamespace}}.Results;
+
+        public static class ResultActionExtensions
+        {
+            public static IActionResult ToOkActionResponse<TValue, TResponse>(this Result<TValue> result, Func<TValue, TResponse> map)
+            {
+                return result.IsSuccess
+                    ? new OkObjectResult(ApiResponse.Success(map(result.Value)))
+                    : result.ToErrorActionResponse();
+            }
+
+            public static IActionResult ToCreatedActionResponse<TValue, TResponse>(
+                this Result<TValue> result,
+                Func<TValue, string> location,
+                Func<TValue, TResponse> map)
+            {
+                return result.IsSuccess
+                    ? new CreatedResult(location(result.Value), ApiResponse.Success(map(result.Value)))
+                    : result.ToErrorActionResponse();
+            }
+
+            public static IActionResult ToNoContentActionResponse<TValue>(this Result<TValue> result)
+            {
+                return result.IsSuccess
+                    ? new NoContentResult()
+                    : result.ToErrorActionResponse();
+            }
+
+            public static IActionResult ToErrorActionResponse(this Result result)
+            {
+                if (result.IsSuccess)
+                {
+                    throw new InvalidOperationException("Cannot convert a successful result to an error response.");
+                }
+
+                var error = result.Error!;
+                var apiError = new ApiError(error.Code, error.Message, ToErrorType(error.Type), (error as ValidationError)?.Failures);
+
+                return new ObjectResult(ApiResponse.Failure<object?>(apiError)) { StatusCode = ToStatusCode(error.Type) };
+            }
+
+            public static IActionResult ToValidationActionErrorResponse(this FluentValidation.Results.ValidationResult validationResult)
+            {
+                var failures = validationResult.Errors
+                    .GroupBy(failure => failure.PropertyName)
+                    .ToDictionary(group => group.Key, group => group.Select(failure => failure.ErrorMessage).ToArray());
+
+                var apiError = new ApiError("validation_failed", "One or more validation errors occurred.", "validation", failures);
+                return new ObjectResult(ApiResponse.Failure<object?>(apiError)) { StatusCode = StatusCodes.Status400BadRequest };
+            }
+
+            private static int ToStatusCode(ErrorType type) => type switch
+            {
+                ErrorType.Validation => StatusCodes.Status400BadRequest,
+                ErrorType.NotFound => StatusCodes.Status404NotFound,
+                ErrorType.Conflict => StatusCodes.Status409Conflict,
+                ErrorType.Unauthorized => StatusCodes.Status401Unauthorized,
+                ErrorType.Forbidden => StatusCodes.Status403Forbidden,
+                _ => StatusCodes.Status500InternalServerError,
+            };
+
+            private static string ToErrorType(ErrorType type) => type switch
+            {
+                ErrorType.Validation => "validation",
+                ErrorType.NotFound => "not_found",
+                ErrorType.Conflict => "conflict",
+                ErrorType.Unauthorized => "unauthorized",
+                ErrorType.Forbidden => "forbidden",
+                _ => "unexpected",
+            };
+        }
+        """;
+
+    /// <summary>
     /// Typed replacement for the anonymous paging object GetAll queries used to return — needed so
     /// OpenAPI can describe <c>ApiResponse&lt;PagedResponse&lt;T&gt;&gt;</c> instead of an anonymous
     /// shape. Mirrors <see cref="BuildPagedResult"/>'s computed properties.
@@ -594,8 +690,25 @@ public static class FoundationFiles
         }
         """;
 
-    public static string BuildEndpointExtensions(GenerationContext context) =>
-        $$"""
+    public static string BuildEndpointExtensions(GenerationContext context, ApiStyle apiStyle = ApiStyle.MinimalApi)
+    {
+        // Controllers style: routing goes through ASP.NET's controller discovery
+        // (MapControllers()), not the IEndpointDefinition reflection scan — a controllers-mode
+        // solution has zero IEndpointDefinition types, so that scan would be a harmless no-op,
+        // but gating it behind the style keeps the emitted code honest about what it actually uses.
+        var mapEndpoints = apiStyle == ApiStyle.Controllers
+            ? "        app.MapControllers();\n"
+            : """
+                    foreach (var endpointType in typeof(EndpointExtensions).Assembly.GetTypes()
+                        .Where(t => typeof(IEndpointDefinition).IsAssignableFrom(t) && t is { IsAbstract: false, IsInterface: false }))
+                    {
+                        var endpoint = (IEndpointDefinition)Activator.CreateInstance(endpointType)!;
+                        endpoint.Map(app);
+                    }
+
+            """;
+
+        return $$"""
         using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
         namespace {{context.Api.RootNamespace}}.Common;
@@ -603,27 +716,22 @@ public static class FoundationFiles
         public static class EndpointExtensions
         {
             /// <summary>
-            /// Maps the health probes plus every discovered <see cref="IEndpointDefinition"/> — adding
-            /// a feature never edits Program.cs. Liveness (<c>/health</c>) reports the process is up;
-            /// readiness (<c>/health/ready</c>) runs the DB-tagged checks so an orchestrator can tell
-            /// "started" from "can actually serve traffic".
+            /// Maps the health probes plus every generated endpoint — adding a feature never edits
+            /// Program.cs. Liveness (<c>/health</c>) reports the process is up; readiness
+            /// (<c>/health/ready</c>) runs the DB-tagged checks so an orchestrator can tell "started"
+            /// from "can actually serve traffic".
             /// </summary>
             public static WebApplication MapApiEndpoints(this WebApplication app)
             {
                 app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false });
                 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") });
 
-                foreach (var endpointType in typeof(EndpointExtensions).Assembly.GetTypes()
-                    .Where(t => typeof(IEndpointDefinition).IsAssignableFrom(t) && t is { IsAbstract: false, IsInterface: false }))
-                {
-                    var endpoint = (IEndpointDefinition)Activator.CreateInstance(endpointType)!;
-                    endpoint.Map(app);
-                }
-
+        {{mapEndpoints}}
                 return app;
             }
         }
         """;
+    }
 
     public static string BuildLoggingExtensions(GenerationContext context) =>
         $$"""
@@ -679,8 +787,16 @@ public static class FoundationFiles
         }
         """;
 
-    public static string BuildApiDependencyInjection(GenerationContext context) =>
-        $$"""
+    public static string BuildApiDependencyInjection(GenerationContext context, ApiStyle apiStyle = ApiStyle.MinimalApi)
+    {
+        // Controllers style needs MVC's controller services registered so generated
+        // [ApiController] classes are discovered and their action results/model binding work;
+        // Minimal API's IEndpointDefinition scan needs no framework registration at all.
+        var controllerRegistration = apiStyle == ApiStyle.Controllers
+            ? "        services.AddControllers();\n"
+            : string.Empty;
+
+        return $$"""
         using {{context.Application.RootNamespace}}.Common.Abstractions;
         using {{context.Api.RootNamespace}}.Services;
 
@@ -691,7 +807,7 @@ public static class FoundationFiles
         {
             public static IServiceCollection AddApi(this IServiceCollection services, IConfiguration configuration)
             {
-                services.AddEndpointsApiExplorer();
+        {{controllerRegistration}}        services.AddEndpointsApiExplorer();
                 services.AddSwaggerGen();
                 services.AddHealthChecks();
                 services.AddHttpContextAccessor();
@@ -700,4 +816,5 @@ public static class FoundationFiles
             }
         }
         """;
+    }
 }
