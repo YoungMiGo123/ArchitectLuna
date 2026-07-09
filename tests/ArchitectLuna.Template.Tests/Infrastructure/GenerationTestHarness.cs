@@ -96,6 +96,16 @@ public static class GenerationTestHarness
         return files;
     }
 
+    /// <summary>
+    /// The persistence provider's solution-level files (AddPersistence registration, schema
+    /// initializer, DB health check) as they'd be emitted by `generate` for the given entities.
+    /// </summary>
+    public static IReadOnlyList<GeneratedFile> PersistenceSolutionFiles(GenerationContext context, string persistenceName, FeatureModel feature)
+    {
+        var references = feature.Entities.Select(e => new EntityReference(feature, e)).ToList();
+        return Persistence(persistenceName).GenerateSolutionPersistence(context, references);
+    }
+
     public static string ContentOf(IReadOnlyList<GeneratedFile> files, string relativePath)
     {
         var file = files.SingleOrDefault(f => f.RelativePath == relativePath);

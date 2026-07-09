@@ -72,7 +72,7 @@ public sealed class CrudGenerationSnapshotTests
         Assert.Contains("Results.Created(", GenerationTestHarness.ContentOf(files, $"{Features}/CreateInvoice/CreateInvoiceEndpoint.cs"));
         Assert.Contains("Results.Ok(result.Value.ToResponse())", GenerationTestHarness.ContentOf(files, $"{Features}/UpdateInvoice/UpdateInvoiceEndpoint.cs"));
         Assert.Contains("Results.NoContent()", GenerationTestHarness.ContentOf(files, $"{Features}/DeleteInvoice/DeleteInvoiceEndpoint.cs"));
-        Assert.Contains("Results.Ok(result.Value.Select(item => item.ToResponse()).ToList())", GenerationTestHarness.ContentOf(files, $"{Features}/GetAllInvoices/GetAllInvoicesEndpoint.cs"));
+        Assert.Contains("Results.Ok(new PagedResult<GetAllInvoicesResponse>(result.Value.Items.Select(item => item.ToResponse()).ToList()", GenerationTestHarness.ContentOf(files, $"{Features}/GetAllInvoices/GetAllInvoicesEndpoint.cs"));
 
         foreach (var operation in new[] { "CreateInvoice", "UpdateInvoice", "DeleteInvoice", "GetInvoiceById", "GetAllInvoices" })
         {
@@ -104,6 +104,29 @@ public sealed class CrudGenerationSnapshotTests
 
         Assert.Contains("Error.NotFound(", handler);
         Assert.DoesNotContain("throw new KeyNotFoundException", handler);
+    }
+
+    [Theory]
+    [InlineData("mediatr")]
+    [InlineData("wolverine")]
+    public void GetAll_IsPaged_MessageResultAndEndpointAllUsePagedResult(string adapter)
+    {
+        var files = GenerationTestHarness.GenerateFeature(
+            GenerationTestHarness.VerticalSliceContext(), adapter, "in-memory", GenerationTestHarness.InvoiceFeature());
+
+        // Message carries Page/PageSize bound from the query string; result type is PagedResult<T>.
+        var message = GenerationTestHarness.ContentOf(files, $"{Features}/GetAllInvoices/GetAllInvoicesQuery.cs");
+        Assert.Contains("int Page", message);
+        Assert.Contains("int PageSize", message);
+
+        var handler = GenerationTestHarness.ContentOf(files, $"{Features}/GetAllInvoices/GetAllInvoicesHandler.cs");
+        Assert.Contains("Result<PagedResult<GetAllInvoicesResult>>", handler);
+        Assert.Contains("Skip((page - 1) * pageSize).Take(pageSize)", handler);
+
+        var endpoint = GenerationTestHarness.ContentOf(files, $"{Features}/GetAllInvoices/GetAllInvoicesEndpoint.cs");
+        // Collection route preserved; page/pageSize bound via [AsParameters]; PagedResult response.
+        Assert.Contains("MapGet(\"/api/invoices\"", endpoint);
+        Assert.Contains("new PagedResult<GetAllInvoicesResponse>(", endpoint);
     }
 
     [Theory]
