@@ -127,6 +127,15 @@ Targets **.NET 10**. Build with `dotnet build ArchitectLuna.sln`, test the fast 
 `dotnet test tests/ArchitectLuna.Core.Tests`, or everything (including the slow end-to-end suite)
 with `dotnet test ArchitectLuna.sln`.
 
+## Contributing / working with AI agents
+
+Every non-trivial change follows the structured workflow in `docs/workflow/feature-workflow.md`:
+classify complexity (S/M/L), auto-plan complex work as a document in `docs/plans/`, implement
+against the plan, and verify across the adapter × persistence matrix. `AGENTS.md` is the entry
+point for any AI coding agent; in Claude Code, the `/feature` skill drives the whole workflow.
+Recurring change types (new adapter, new persistence provider, CLI command, template change) have
+step-by-step checklists in `docs/workflow/checklists/`.
+
 ## Status
 
 M1–M4 are done: every adapter × persistence combination generates a compiling solution end to end,
