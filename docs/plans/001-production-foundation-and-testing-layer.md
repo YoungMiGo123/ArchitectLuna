@@ -1,6 +1,6 @@
 # Plan 001: Production foundation + testing layer
 
-- **Status:** In progress
+- **Status:** Done
 - **Complexity:** L
 - **Author:** Claude (claude-fable-5 session)
 - **Date started:** 2026-07-09
@@ -184,8 +184,53 @@ E2E ordering/matrix/generated-project-test coverage — wired into CI.
   full list until a paging requirement lands).
 - EF Core migrations, `adapter switch`, publishing the tool — unchanged roadmap items.
 
-## Outcome (fill in at delivery)
+## Outcome
 
-- What shipped, with commit hashes.
-- Deviations from the plan above and why.
-- Follow-ups discovered (add real ones to `docs/ROADMAP.md`).
+**Shipped** (branch `claude/testing-implementation-architecture-ysvk31`):
+
+1. Requirement docs + this plan checked in.
+2. Production foundation (requirement 001): Result pattern generated into every scaffold,
+   `BaseEntity` inherited by every generated entity/document, `IUserContext`/`IDateTimeProvider`
+   abstractions + HTTP/system implementations, correlation-ID and upgraded exception middleware,
+   Serilog request logging, Request/Response DTO + extension-method mapping layer per slice,
+   `Contracts` as a fifth `ProjectTarget`/project, generated `.editorconfig`/README/docs and an
+   Infrastructure.Tests project, and the clean extension-method startup
+   (`FoundationFiles` + rewritten `ProgramCsBuilder`); `IPersistenceGenerator` registration hook
+   reshaped to `BuildServiceRegistration`/`ServiceRegistrationUsings`; handlers return
+   `Result<T>` with NotFound-as-value across all three real persistence providers; `--architecture`
+   defaults to `clean-architecture`.
+3. Ordering rules centralized in `Core/Editing/ModelEditor` (+ new `add crud` verb and the
+   outside-project `WorkspaceGuard`); the UI's add-entity page now delegates to it too.
+4. Testing layer (requirement 002): categorized `Core.Tests` (56 tests), new in-memory
+   `ArchitectLuna.Template.Tests` (78 tests, sub-second, zero I/O), E2E additions
+   (`GenerationOrderingTests`, `GeneratedProjectTestSuiteTests` running `dotnet test` inside a
+   generated solution, clean-architecture matrix widened to both adapters × every persistence
+   provider, layering asserts extended to Contracts/mappings), CI split into fast/E2E/smoke
+   tiers with a representative generated-solution `dotnet test` step.
+
+**Verified:** full `dotnet build` + `dotnet test ArchitectLuna.sln` (all three tiers, E2E
+serialized); a generated API was also run live and exercised over HTTP — 201 Created + Location,
+200, 204, 404 (missing id), 400 (FluentValidation), and the `X-Correlation-ID` echo all confirmed
+against a real process.
+
+**Deviations from plan:**
+
+- Wolverine solutions additionally require `WolverineFx.RuntimeCompilation` +
+  `opts.UseRuntimeCompilation()` — discovered because the new generated-test-suite tier boots the
+  app: core WolverineFx stopped shipping the runtime compiler, so generated apps compiled but
+  threw at startup. Exactly the class of bug requirement 002 exists to catch.
+- The E2E suite is now serialized via `xunit.runner.json`: each test is whole-machine work
+  (scaffold subprocesses + full builds), and parallel classes starved each other into per-process
+  timeouts on 4-vCPU machines. `ProcessRunner`'s default timeout also went 5→10 minutes.
+- `ApplicationAssemblyMarker` was removed — the generated `ApplicationDependencyInjection` class
+  is a better assembly anchor and exists for free.
+- Requirement 001 shows `Contracts/Invoices/` flat; generated DTOs use
+  `Contracts/Features/{Feature}/{Operation}/` so adapters stay layout-agnostic (plan decision 3).
+
+**Follow-ups discovered:**
+
+- Scaffolding cost is dominated by ~20 sequential `dotnet add package` restores (~70s total on a
+  warm cache, far more on cold/proxied networks). Batching or a single deferred restore would
+  speed both users and CI; needs a design that keeps pinned (non-floating) versions.
+- Audit-field population (CreatedAt/UpdatedBy) and `PagedResult<T>` wiring for GetAll remain
+  intentionally unimplemented (see Out of scope).
