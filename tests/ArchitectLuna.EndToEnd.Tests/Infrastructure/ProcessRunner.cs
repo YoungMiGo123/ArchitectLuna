@@ -15,8 +15,9 @@ public static class ProcessRunner
 {
     // Generous because a Clean Architecture scaffold shells out to ~20 sequential
     // `dotnet add package` calls, each of which round-trips to the NuGet feed even when the
-    // package is already in the local cache.
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(10);
+    // package is already in the local cache — on a slow or proxied network that alone can take
+    // >10 minutes for the heavier persistence package graphs (Marten, SQL Server).
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(20);
 
     public static ProcessResult Run(string fileName, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan? timeout = null)
     {
