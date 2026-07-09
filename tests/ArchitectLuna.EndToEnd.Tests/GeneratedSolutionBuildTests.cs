@@ -72,6 +72,54 @@ public sealed class GeneratedSolutionBuildTests
         }
     }
 
+    [Theory]
+    [Trait("Category", "EndToEnd")]
+    [InlineData("mediatr")]
+    [InlineData("wolverine")]
+    public void GeneratedSolution_WithControllersApiStyle_Compiles(string adapter)
+    {
+        // Persistence is already proven orthogonal to the envelope/api-style choice by the matrix
+        // above and by the fast Template.Tests tier — in-memory persistence is enough here to
+        // prove `--api-style controllers` compiles for real for both adapters, without redundantly
+        // re-running the full persistence matrix under controllers too.
+        var cliDllPath = CliLocator.ResolveCliDllPath();
+        var workDir = TempWorkspace.CreateUnique();
+        try
+        {
+            var newApi = ProcessRunner.RunCli(cliDllPath, workDir, "new", "api", SolutionName, "--adapter", adapter, "--persistence", "in-memory", "--architecture", "vertical-slice", "--api-style", "controllers");
+            Assert.True(newApi.ExitCode == 0, $"'new api' (adapter={adapter}, api-style=controllers) failed:\n{newApi}");
+
+            var solutionRoot = Path.Combine(workDir, SolutionName);
+
+            var addFeature = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "feature", FeatureName);
+            Assert.True(addFeature.ExitCode == 0, $"'add feature' failed:\n{addFeature}");
+
+            var addEntity = ProcessRunner.RunCli(
+                cliDllPath,
+                solutionRoot,
+                "add", "entity", FeatureName, EntityName,
+                "--field", "Name:string",
+                "--field", "Quantity:int",
+                "--rule", "Quantity:GreaterThan(0)");
+            Assert.True(addEntity.ExitCode == 0, $"'add entity' failed:\n{addEntity}");
+
+            var generate = ProcessRunner.RunCli(cliDllPath, solutionRoot, "generate");
+            Assert.True(generate.ExitCode == 0, $"'generate' failed:\n{generate}");
+
+            var apiProjectDir = Path.Combine(solutionRoot, "src", $"{SolutionName}.Api");
+            var controllerPath = Path.Combine(apiProjectDir, "Features", FeatureName, "CreateWidget", "CreateWidgetController.cs");
+            Assert.True(File.Exists(controllerPath), $"Expected generated controller at {controllerPath}");
+            Assert.Contains("[ApiController]", File.ReadAllText(controllerPath));
+
+            var build = ProcessRunner.RunDotnetBuild(solutionRoot, TimeSpan.FromMinutes(5));
+            Assert.True(build.ExitCode == 0, $"'dotnet build' of the generated solution (adapter={adapter}, api-style=controllers) failed:\n{build}");
+        }
+        finally
+        {
+            TempWorkspace.TryDelete(workDir);
+        }
+    }
+
     /// <summary>
     /// Content-level checks for specific known-good regressions, independent of whether the
     /// solution happens to compile (a subtle wording/route bug can compile fine and still be

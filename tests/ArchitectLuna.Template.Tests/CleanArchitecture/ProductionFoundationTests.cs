@@ -119,6 +119,16 @@ public sealed class ProductionFoundationTests
     }
 
     [Fact]
+    public void ExceptionHandlingMiddleware_WrapsUnhandledFailuresInTheEnvelope()
+    {
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.CleanArchitectureContext(), "mediatr");
+        var content = GenerationTestHarness.ContentOf(files, $"{Api}/Common/ExceptionHandlingMiddleware.cs");
+
+        Assert.Contains("ApiResponse.Failure<object?>(error)", content);
+        Assert.DoesNotContain("problem+json", content);
+    }
+
+    [Fact]
     public void Marten_AddPersistence_RegistersEachDocumentTypeInInfrastructure()
     {
         var files = GenerationTestHarness.PersistenceSolutionFiles(GenerationTestHarness.CleanArchitectureContext(), "marten", GenerationTestHarness.InvoiceFeature());
