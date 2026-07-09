@@ -171,7 +171,11 @@ public sealed class WolverineAdapter : IFrameworkAdapter
                 Namespace = slice.ApplicationNamespace,
                 MessageName = names.Message,
                 ValidatorName = names.Validator,
-                Fields = command.Fields.Select(f => new ValidatorFieldRenderModel { Name = f.Name, Rules = f.Rules }).ToList(),
+                Fields = command.Fields.Select(f => new ValidatorFieldRenderModel
+                {
+                    Name = f.Name,
+                    Rules = DefaultValidationRules.DefaultsFor(f).Concat(f.Rules).Distinct().ToList(),
+                }).ToList(),
             };
             files.Add(new GeneratedFile($"{slice.ApplicationPath}/{names.Validator}.cs", RenderShared("Validator.cs.sbn", validatorModel)));
         }

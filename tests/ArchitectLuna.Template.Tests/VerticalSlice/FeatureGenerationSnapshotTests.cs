@@ -114,6 +114,21 @@ public sealed class FeatureGenerationSnapshotTests
 
         Assert.Contains("AbstractValidator<CreateInvoiceCommand>", validator);
         Assert.Contains("RuleFor(x => x.AmountCents).GreaterThan(0);", validator);
-        Assert.Contains("RuleFor(x => x.Currency).MaximumLength(3);", validator);
+        // Currency gets the field-type default (NotEmpty, string) plus the name-based default
+        // (MaximumLength(3), name contains "currency") plus the explicit --rule, deduplicated.
+        Assert.Contains("RuleFor(x => x.Currency).NotEmpty().MaximumLength(3);", validator);
+    }
+
+    [Theory]
+    [InlineData("mediatr")]
+    [InlineData("wolverine")]
+    public void Validator_AppliesFieldTypeDefaultsEvenWithoutExplicitRules(string adapter)
+    {
+        var files = GenerationTestHarness.GenerateFeature(
+            GenerationTestHarness.VerticalSliceContext(), adapter, "in-memory", GenerationTestHarness.InvoiceFeature());
+        var validator = GenerationTestHarness.ContentOf(files, $"{Slice}/CreateInvoiceValidator.cs");
+
+        // CustomerId (Guid, no explicit rules) still gets a sensible default.
+        Assert.Contains("RuleFor(x => x.CustomerId).NotEmpty();", validator);
     }
 }
