@@ -53,6 +53,31 @@ entity's standard shape doesn't cover.
 and installing it globally makes `architect-luna` a normal command on your `PATH`, runnable from
 **any** project folder — not just this repo.
 
+### 0. Install from the team feed (no checkout needed)
+
+Every merge to `master` automatically publishes the tool to the team's Azure Artifacts feed (see
+"Publishing" below), so the fastest path is to install straight from there:
+
+```bash
+dotnet tool install --global architect-luna \
+  --add-source https://pkgs.dev.azure.com/LoadshednomoConsulting/_packaging/Nuget-Packages/nuget/v3/index.json
+```
+
+The feed is private, so your machine needs Azure Artifacts credentials — either the
+[Azure Artifacts Credential Provider](https://github.com/microsoft/artifacts-credprovider) (it
+prompts for a device login on first restore) or a `nuget.config` entry with a PAT. Registering the
+feed once makes updates a one-liner:
+
+```xml
+<add key="Nuget-Packages" value="https://pkgs.dev.azure.com/LoadshednomoConsulting/_packaging/Nuget-Packages/nuget/v3/index.json" />
+```
+
+```bash
+dotnet tool update --global architect-luna
+```
+
+The steps below are the local, feed-free path — useful offline or when testing unmerged changes.
+
 ### 1. Package it as a NuGet tool (`dotnet pack`)
 
 ```bash
@@ -74,8 +99,8 @@ no separate publish step is required to produce the package.
 dotnet tool install --global --add-source ./nupkg architect-luna
 ```
 
-**From a published feed** (see step 3) — once the package is on GitHub Packages, NuGet.org, or any
-other feed, anyone can install it without cloning this repo at all:
+**From a published feed** — the team feed (step 0 above) is published automatically on every merge
+to `master` (see step 4), so this is rarely needed by hand:
 
 ```bash
 dotnet tool install --global architect-luna --add-source <your-feed-url>
@@ -105,27 +130,22 @@ dotnet build && dotnet run --project src/MyApp.Api
 `new api` defaults to `--persistence in-memory`, so the `dotnet run` above serves a fully working
 CRUD API immediately — no database to stand up first (see "The core idea" above).
 
-### 4. Publish to a real feed (optional — lets teammates/CI skip the checkout)
+### 4. Publishing — automatic on every merge to `master`
 
-To make the package installable on *other* machines without them needing this repo checked out at
-all, push it to a feed:
+`.github/workflows/publish-nuget.yml` packs the tool and pushes it to the Azure Artifacts feed
+(`Nuget-Packages` in the `LoadshednomoConsulting` org) on every push to `master`. Nobody runs
+`dotnet nuget push` by hand:
 
-- **[GitHub Packages](https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-nuget-registry)**
-  — natural fit since this repo is already on GitHub:
-  ```bash
-  dotnet nuget push ./nupkg/architect-luna.0.1.0.nupkg \
-    --source https://nuget.pkg.github.com/YoungMiGo123/index.json \
-    --api-key <a GitHub PAT with write:packages scope>
-  ```
-- **[NuGet.org](https://www.nuget.org/)** — for public distribution:
-  ```bash
-  dotnet nuget push ./nupkg/architect-luna.0.1.0.nupkg \
-    --source https://api.nuget.org/v3/index.json \
-    --api-key <your NuGet.org API key>
-  ```
-
-After that, anyone with the feed configured (`dotnet nuget add source ...` or a `nuget.config`)
-just runs `dotnet tool install --global architect-luna` — no `git clone`, no local `dotnet pack`.
+- **Versioning is automatic**: each publish is `<VERSION_PREFIX>.<run number>` (e.g. `0.1.42`) —
+  the workflow's run number is the build number, so versions increase monotonically and
+  `dotnet tool update` always sees new merges as newer. Bump major/minor by editing
+  `VERSION_PREFIX` at the top of the workflow; the `<Version>` in `ArchitectLuna.Cli.csproj` only
+  applies to local `dotnet pack` runs.
+- **Gated**: the publish job builds the solution and runs the fast test suite first (the full
+  E2E matrix runs on the same push via `ci.yml`), and pushes with `--skip-duplicate` so re-runs
+  are harmless.
+- **One-time setup**: the repo needs an `AZURE_ARTIFACTS_PAT` Actions secret — an Azure DevOps PAT
+  with *Packaging → Read & write* scope. Details in the comment at the top of the workflow file.
 
 ### Updating / uninstalling
 
