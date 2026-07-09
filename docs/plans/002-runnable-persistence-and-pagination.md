@@ -1,6 +1,6 @@
 # Plan 002: Runnable persistence + pagination + production hardening
 
-- **Status:** In progress
+- **Status:** Done
 - **Complexity:** L
 - **Author:** Claude (claude-opus-4-8 session)
 - **Date started:** 2026-07-09
@@ -96,6 +96,46 @@ real pagination through `GetAll` across both adapters and all four persistence p
   Core path, verified by build only unless a SQL Server instance is reachable).
 - Cursor/keyset pagination (offset paging is the V1 shape).
 
-## Outcome (fill in at delivery)
+## Outcome
 
-- What shipped, deviations, follow-ups.
+**Shipped** (branch `claude/testing-implementation-architecture-ysvk31`, on top of master):
+
+- Persistence registration moved to a provider-emitted, `generate`-regenerated `AddPersistence`
+  file (dropped `IPersistenceGenerator.BuildServiceRegistration`/`ServiceRegistrationUsings`).
+- EF Core: `DatabaseInitializer` (migrate-if-migrations-exist-else-`EnsureCreated`),
+  `DatabaseHealthCheck` (`CanConnectAsync`), `EnableRetryOnFailure`. Marten:
+  `RegisterDocumentType<T>` per entity + `ApplyAllDatabaseChangesOnStartup()` + `MartenHealthCheck`.
+  `/health` (liveness) + `/health/ready` (DB readiness) split.
+- Paged `GetAll` end to end: `QueryModel.IsPaged`, `CrudSynthesizer` Page/PageSize params,
+  `RouteInference` keeps the collection route, both adapters render `Result<PagedResult<T>>` +
+  `PagedResult<Response>` endpoints, all four providers do `Skip`/`Take` + `Count`.
+
+**Verified against a live Postgres** (a real cluster stood up in the session), not just
+`dotnet build`: MediatR+EF Core, Wolverine+Marten, and Wolverine+EF Core each auto-created their
+tables, served 201/200/204/404/400, and returned correct pagination metadata
+(`totalCount`/`totalPages`/`hasNextPage`); `/health/ready` reflected DB reachability. Fast suites:
+Core 57, Template 86, all green.
+
+**Deviations from plan:**
+
+- **EF Core `Design` package dropped from the default scaffold** (plan had included it). Its
+  `PrivateAssets=all` pinned `Microsoft.EntityFrameworkCore.Relational` to Microsoft's latest patch
+  while the Npgsql provider tracked its own, and the private version never reached the startup
+  project's runtime output — the app compiled but threw a `Relational` `FileNotFoundException` at
+  boot. Dropping it makes the graph consistent and the app runnable; migrations become an opt-in
+  step (`dotnet add package Microsoft.EntityFrameworkCore.Design` + `dotnet ef migrations add`),
+  which the `DatabaseInitializer` already prefers over `EnsureCreated` when present.
+- **Wolverine `ServiceLocationPolicy.AlwaysAllowed`** (not in the plan). Wolverine 6 defaults to
+  `NotAllowed` and threw `InvalidServiceLocationException` at the first message when a handler
+  method injected a scoped `DbContext`/`IDocumentSession`. `AlwaysAllowed` lets Wolverine resolve
+  it from the DI scope, keeping the messaging and persistence seams orthogonal with no integration
+  package. This was a latent bug on master (Wolverine handlers had only ever been built, never run).
+
+**Follow-ups discovered:**
+
+- Scaffold an initial EF Core migration + wire `dotnet ef` so the migration-tracked path works
+  without hand-adding `Design` (updated the EF Core migrations roadmap item).
+- SQL Server was verified by build only (Postgres covered the two EF Core runtimes + Marten);
+  a SQL Server live run would close the last matrix gap.
+- Cursor/keyset pagination and further production concerns (CORS, rate limiting, OpenTelemetry,
+  API versioning, auth) remain out of scope — noted for a future pass.

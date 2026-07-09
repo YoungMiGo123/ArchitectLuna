@@ -101,6 +101,22 @@
   test` run of a generated solution's own test suite — which immediately caught that core
   WolverineFx stopped shipping its runtime compiler: generated Wolverine apps compiled but threw
   at startup; fixed via `WolverineFx.RuntimeCompilation` + `opts.UseRuntimeCompilation()`).
+- **Runnable persistence + pagination + production hardening** (plan:
+  `docs/plans/002-runnable-persistence-and-pagination.md`). Generated `efcore-postgres`/
+  `efcore-sqlserver`/`marten` solutions now create their own schema at startup and serve real CRUD
+  against a live database with no manual migration step — verified end to end against a live
+  Postgres for MediatR+EF Core, Wolverine+Marten, and Wolverine+EF Core, not just `dotnet build`.
+  Each provider emits an `AddPersistence` extension (regenerated per `generate` with full entity
+  knowledge, replacing the old scaffold-time `BuildServiceRegistration`): EF Core adds a
+  `DatabaseInitializer` (migrate-else-`EnsureCreated`) + `DatabaseHealthCheck` + connection
+  resilience; Marten registers every document type + `ApplyAllDatabaseChangesOnStartup()` + a
+  health check. `/health` (liveness) and `/health/ready` (DB readiness) are split. Synthesized
+  `GetAll` is paged (`?page=&pageSize=` → `PagedResult<T>` with `Skip`/`Take`/`Count`) across both
+  adapters and all providers. Wolverine handlers set `ServiceLocationPolicy.AlwaysAllowed` so they
+  resolve the injected `DbContext`/`IDocumentSession` (Wolverine 6 otherwise throws at the first
+  message). EF Core's `Design` package is deliberately not scaffolded (its `PrivateAssets=all`
+  split the `Relational` assembly version between compile and runtime and threw at startup);
+  migrations are a documented opt-in.
 
 ## Near-term — get to a demoable prototype
 
@@ -109,10 +125,12 @@
   instead of at the next manual build.
 - **`adapter switch`.** Regenerate an existing model onto a different adapter in place — the
   proof that `IFrameworkAdapter` is a real seam, not just a naming convention.
-- **EF Core migrations.** `dotnet ef migrations add`/`database update` wired into `new api`/
-  `generate` (or documented as a manual follow-up step) — right now a generated `DbContext`
-  compiles but nothing creates the schema. (The new `in-memory` default sidesteps this for a
-  first run, but `efcore-postgres`/`efcore-sqlserver` still need it before they're runnable.)
+- **EF Core migrations, first-class.** *(Runnability is done — see plan 002: a generated
+  `efcore-*` app now creates its schema at startup via the `DatabaseInitializer` and is runnable
+  immediately; migrations are a documented opt-in.)* Remaining: scaffold an initial migration and
+  wire `dotnet ef migrations add`/`database update` into the tool so teams get the
+  migration-tracked path without hand-adding the `Design` package — the initializer already
+  prefers migrations over `EnsureCreated` when any exist.
 - **UI: `--rule` support in the add-entity form.** The CLI's `add entity --rule Field:RuleExpr`
   has no UI equivalent yet (self-disclosed gap from the UI build) — only Name/Type field rows.
 
