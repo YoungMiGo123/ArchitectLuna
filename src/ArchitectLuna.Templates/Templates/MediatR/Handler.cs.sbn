@@ -1,0 +1,25 @@
+using MediatR;
+{{ for u in handler_usings }}
+using {{ u }};
+{{ end }}
+
+namespace {{ namespace }};
+
+public sealed class {{ handler_name }} : IRequestHandler<{{ message_name }}, {{ result_type }}>
+{
+    {{ if has_handler_dependency }}
+    private readonly {{ handler_dependency_type }} {{ handler_dependency_param }};
+
+    public {{ handler_name }}({{ handler_dependency_type }} {{ handler_dependency_param }})
+    {
+        this.{{ handler_dependency_param }} = {{ handler_dependency_param }};
+    }
+
+    {{ end }}
+    public async Task<{{ result_type }}> Handle({{ message_name }} message, CancellationToken cancellationToken)
+    {
+        // <architect:region name="handler-body">
+        {{ handler_body }}
+        // </architect:region>
+    }
+}

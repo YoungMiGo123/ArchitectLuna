@@ -1,0 +1,81 @@
+@page
+@model AddEntityModel
+@{
+    ViewData["Title"] = "Add Entity";
+}
+
+<h1>Add Entity</h1>
+<p class="muted">
+    An entity is the source of truth: adding one synthesizes the standard
+    Create/Update/Delete commands and GetById/GetAll queries for it (same logic as
+    <code>architect-luna add entity</code>).
+</p>
+
+<form method="get" class="inline-form">
+    <input type="text" name="Root" value="@Model.Root" placeholder="/path/to/YourSolution" size="50" />
+    <button type="submit">Load</button>
+</form>
+
+@if (Model.ErrorMessage is not null)
+{
+    <div class="error-box">@Model.ErrorMessage</div>
+}
+
+@if (Model.SuccessMessage is not null)
+{
+    <div class="success-box">@Model.SuccessMessage</div>
+}
+
+@if (Model.LoadedModel is not null)
+{
+    var m = Model.LoadedModel;
+
+    <form method="post" id="add-entity-form">
+        <input type="hidden" name="Root" value="@Model.Root" />
+
+        <div class="card">
+            <label>
+                Feature name
+                <input type="text" name="FeatureName" list="feature-list" value="@Model.FeatureName" required />
+            </label>
+            <datalist id="feature-list">
+                @foreach (var feature in m.Features)
+                {
+                    <option value="@feature.Name"></option>
+                }
+            </datalist>
+            <p class="muted" style="margin:0.3rem 0 0;">Existing feature names are suggested; type a new one to create that feature.</p>
+        </div>
+
+        <div class="card">
+            <label>
+                Entity name
+                <input type="text" name="EntityName" value="@Model.EntityName" placeholder="Invoice" required />
+            </label>
+        </div>
+
+        <div class="card">
+            <h3 style="margin-top:0;">Fields</h3>
+            <div id="field-rows">
+                <div class="field-row">
+                    <input type="text" name="FieldName" placeholder="Name" />
+                    <input type="text" name="FieldType" placeholder="Type (e.g. string, Guid, long)" />
+                </div>
+            </div>
+            <button type="button" class="secondary" id="add-field-row">+ Add field</button>
+        </div>
+
+        <button type="submit">Add entity</button>
+    </form>
+}
+
+<script>
+    document.getElementById('add-field-row')?.addEventListener('click', function () {
+        var container = document.getElementById('field-rows');
+        var row = document.createElement('div');
+        row.className = 'field-row';
+        row.innerHTML = '<input type="text" name="FieldName" placeholder="Name" />' +
+                         '<input type="text" name="FieldType" placeholder="Type (e.g. string, Guid, long)" />';
+        container.appendChild(row);
+    });
+</script>

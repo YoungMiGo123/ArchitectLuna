@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ArchitectLuna.EndToEnd.Tests</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <!--
+      These tests shell out to the built CLI and to a `dotnet build` on freshly scaffolded
+      solutions; they must not run as part of a normal fast inner loop test pass. They are
+      identified by the "EndToEnd" Category trait (see GeneratedSolutionBuildTests.cs and
+      ProtectedRegionRegenerationTests.cs) so CI/dev workflows can opt in or out via xunit's
+      Category test filter.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+</Project>

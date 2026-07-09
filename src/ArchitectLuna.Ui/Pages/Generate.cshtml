@@ -1,0 +1,51 @@
+@page
+@model GenerateModel
+@{
+    ViewData["Title"] = "Generate";
+}
+
+<h1>Generate</h1>
+<p class="muted">Runs <code>architect-luna generate</code> against the solution root below, using the CLI build already produced by this repo.</p>
+
+<form method="get" class="inline-form">
+    <input type="text" name="Root" value="@Model.Root" placeholder="/path/to/YourSolution" size="50" />
+    <button type="submit">Load</button>
+</form>
+
+@if (Model.ErrorMessage is not null)
+{
+    <div class="error-box">@Model.ErrorMessage</div>
+}
+
+@if (Model.LoadedModel is not null)
+{
+    var m = Model.LoadedModel;
+    <div class="card">
+        <strong>@m.SolutionName</strong>
+        <span class="muted">@Model.ResolvedRoot</span><br />
+        <span class="badge">adapter: @m.Adapter</span>
+        <span class="badge">persistence: @m.Persistence</span>
+        <span class="badge">@m.Features.Count feature(s)</span>
+    </div>
+
+    <form method="post">
+        <input type="hidden" name="Root" value="@Model.Root" />
+        <button type="submit">Run generate</button>
+    </form>
+}
+
+@if (Model.HasRun)
+{
+    <h2>Result</h2>
+    <p>
+        @if (Model.RunSucceeded)
+        {
+            <span class="success-box">generate completed successfully.</span>
+        }
+        else
+        {
+            <span class="error-box">generate failed.</span>
+        }
+    </p>
+    <pre>@Model.Output</pre>
+}

@@ -1,0 +1,30 @@
+using {{ dispatcher_using }};
+using {{ root_namespace }}.Common;
+
+namespace {{ namespace }};
+
+public sealed class {{ endpoint_name }} : IEndpointDefinition
+{
+    public void Map(IEndpointRouteBuilder app)
+    {
+        {{ if is_single_route_param }}
+        app.MapGet("{{ route }}", async ({{ route_param_type }} {{ route_param_name }}, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken) =>
+        {
+            var result = await {{ dispatch_call }};
+            return Results.Ok(result);
+        });
+        {{ else if is_zero_param }}
+        app.MapGet("{{ route }}", async ({{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken) =>
+        {
+            var result = await {{ dispatch_call }};
+            return Results.Ok(result);
+        });
+        {{ else }}
+        app.MapGet("{{ route }}", async ([AsParameters] {{ message_name }} query, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken) =>
+        {
+            var result = await {{ dispatch_call }};
+            return Results.Ok(result);
+        });
+        {{ end }}
+    }
+}

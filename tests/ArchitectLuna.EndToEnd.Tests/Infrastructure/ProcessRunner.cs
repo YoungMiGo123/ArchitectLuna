@@ -1,0 +1,78 @@
+using System.Diagnostics;
+using System.Text;
+
+namespace ArchitectLuna.EndToEnd.Tests.Infrastructure;
+
+/// <summary>Result of a shelled-out process run: exit code plus captured stdout/stderr for assertion failure messages.</summary>
+public sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError)
+{
+    public override string ToString() =>
+        $"exit code {ExitCode}\n--- stdout ---\n{StandardOutput}\n--- stderr ---\n{StandardError}";
+}
+
+/// <summary>Shells out to a process (the built CLI, or `dotnet build`) and captures its result.</summary>
+public static class ProcessRunner
+{
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(5);
+
+    public static ProcessResult Run(string fileName, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan? timeout = null)
+    {
+        var psi = new ProcessStartInfo(fileName)
+        {
+            WorkingDirectory = workingDirectory,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+
+        foreach (var arg in arguments)
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        using var process = Process.Start(psi)
+            ?? throw new InvalidOperationException($"Failed to start process '{fileName}'.");
+
+        var stdout = new StringBuilder();
+        var stderr = new StringBuilder();
+
+        process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.AppendLine(e.Data); };
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        var effectiveTimeout = timeout ?? DefaultTimeout;
+        if (!process.WaitForExit((int)effectiveTimeout.TotalMilliseconds))
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // best effort
+            }
+
+            throw new TimeoutException(
+                $"Process '{fileName} {string.Join(' ', arguments)}' in '{workingDirectory}' did not exit within {effectiveTimeout}.\n" +
+                $"--- stdout so far ---\n{stdout}\n--- stderr so far ---\n{stderr}");
+        }
+
+        // Ensure async output/error handlers have flushed everything before we read the buffers.
+        process.WaitForExit();
+
+        return new ProcessResult(process.ExitCode, stdout.ToString(), stderr.ToString());
+    }
+
+    /// <summary>Convenience for invoking the architect-luna CLI dll via `dotnet &lt;dll&gt; &lt;args&gt;`.</summary>
+    public static ProcessResult RunCli(string cliDllPath, string workingDirectory, params string[] arguments)
+    {
+        var fullArgs = new List<string> { cliDllPath };
+        fullArgs.AddRange(arguments);
+        return Run("dotnet", fullArgs, workingDirectory);
+    }
+
+    /// <summary>Convenience for `dotnet build` in a given directory.</summary>
+    public static ProcessResult RunDotnetBuild(string workingDirectory, TimeSpan? timeout = null) =>
+        Run("dotnet", new[] { "build" }, workingDirectory, timeout);
+}

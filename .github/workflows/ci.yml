@@ -1,0 +1,80 @@
+name: CI
+
+# Deliberately NOT filtered by branch name (`branches: [...]`) — the repo's default branch name
+# isn't guaranteed, and any branch filter here would silently stop this workflow from running.
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore ArchitectLuna.sln
+
+      - name: Build
+        run: dotnet build ArchitectLuna.sln --no-restore --configuration Release
+
+      # Run against the whole solution (rather than naming ArchitectLuna.Core.Tests.csproj
+      # directly) so that tests/ArchitectLuna.EndToEnd.Tests picks up automatically the moment a
+      # parallel workstream wires it into ArchitectLuna.sln, with no follow-up edit to this
+      # workflow required. Tradeoff: the end-to-end suite is described as slow (it does a real
+      # dotnet build per test), so once it lands this single job will slow down on every push/PR.
+      # That's an acceptable default for now (today it's identical in cost to naming
+      # ArchitectLuna.Core.Tests.csproj directly, since that's the only test project that
+      # exists); if/when the end-to-end suite meaningfully slows CI down, the integrator should
+      # split this into a fast unit-test job that still runs on every push/PR and a slower
+      # end-to-end job (e.g. gated to pull_request only, or a separate scheduled workflow).
+      - name: Test
+        run: dotnet test ArchitectLuna.sln --no-build --configuration Release
+
+  e2e-smoke:
+    name: CLI smoke (${{ matrix.adapter }} / ${{ matrix.persistence }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        adapter: [mediatr, wolverine]
+        persistence: [none, efcore-postgres, efcore-sqlserver, marten]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build CLI
+        run: dotnet build src/ArchitectLuna.Cli/ArchitectLuna.Cli.csproj --configuration Release
+
+      - name: new api / add feature / add entity / generate / build
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cli_dll="$GITHUB_WORKSPACE/src/ArchitectLuna.Cli/bin/Release/net10.0/architect-luna.dll"
+          work_dir="$RUNNER_TEMP/smoke-${{ matrix.adapter }}-${{ matrix.persistence }}"
+          mkdir -p "$work_dir"
+          cd "$work_dir"
+
+          dotnet "$cli_dll" new api SmokeApi --adapter "${{ matrix.adapter }}" --persistence "${{ matrix.persistence }}"
+          cd SmokeApi
+
+          dotnet "$cli_dll" add feature Todos
+          dotnet "$cli_dll" add entity Todos TodoItem --field Title:string --field IsDone:bool --rule "Title:NotEmpty()"
+          dotnet "$cli_dll" generate
+
+          dotnet build SmokeApi.slnx --configuration Release

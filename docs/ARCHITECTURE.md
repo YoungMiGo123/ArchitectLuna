@@ -3,97 +3,101 @@
 ## Pipeline
 
 ```
-spec (YAML/JSON) → parse → IR (Model) → resolve template pack → render → format → write
+.architect/model.yaml → ArchitectModel (IR) → validate → IFrameworkAdapter + IPersistenceGenerator
+  → Scriban render → protected-region merge against existing files → write → .architect/manifest.json
 ```
 
-1. **Spec** — a declarative, hand-authored file describing the domain:
-   entities, value objects, aggregates, use cases/commands/queries, and which
-   architecture pattern to target. This is the only input that varies between
-   runs.
-2. **Parse** — the spec is validated against a schema and loaded into an
-   in-memory **Intermediate Representation (IR)**. Parsing is pure: no file
-   system reads beyond the spec itself, no clock, no environment lookups.
-3. **Template pack resolution** — a template pack (e.g.
-   `InveroArchitect.Templates.CleanArchitecture`) is selected and pinned by
-   version. The pack maps IR nodes to file outputs.
-4. **Render** — each output file is produced by a template function of
-   `(IR node, pack version) → text`. Templates are pure functions with no
-   side effects; they cannot read ambient state.
-5. **Format** — all rendered text passes through a single canonical
-   formatter pass (pinned `dotnet format`/Roslyn config) so output style is
-   independent of the machine or IDE that ran generation.
-6. **Write** — files are written in a deterministic, sorted order. The tool
-   also supports a dry-run diff mode instead of writing.
+1. **Intent Model** — `.architect/model.yaml`, a small YAML document: solution name, root
+   namespace, chosen adapter, and a list of features. Each feature holds entities, commands, and
+   queries. It is hand-edited indirectly, through the `add feature` / `add entity` / `add
+   command` / `add query` CLI commands — see `ArchitectLuna.Core/Model/*.cs`.
+2. **Entity → CRUD synthesis** — `add entity` is the primary way commands/queries get created.
+   `CrudSynthesizer` (`ArchitectLuna.Core/Model/CrudSynthesizer.cs`) expands one `EntityModel`
+   into the standard Create/Update/Delete commands and GetById/GetAll queries, so the model is
+   built outward from entities rather than assembled command-by-command. `add command`/`add
+   query` remain available for anything a standard CRUD shape doesn't cover.
+3. **Validation** — `ModelValidator` checks the model before generation (known adapter, no
+   duplicate feature/command/query/field names) and fails fast with a readable error list.
+4. **Adapter dispatch** — `IFrameworkAdapter` (`ArchitectLuna.Core/Generation/IFrameworkAdapter.cs`)
+   is the single seam between "what the model says" and "what code gets written." `MediatRAdapter`
+   and `WolverineAdapter` both implement it. Given a `FeatureModel` + `CommandModel`/`QueryModel`,
+   an adapter returns a list of `GeneratedFile` (relative path + rendered content) — it does no
+   file I/O itself.
+5. **Route inference** — `RouteInference` (`ArchitectLuna.Core/Naming/RouteInference.cs`) is
+   shared by both adapters so the same model always produces the same route shape regardless of
+   `--adapter`: `POST /api/{feature}` for Create, `PUT`/`DELETE /api/{feature}/{id}` for
+   Update/Delete, `GET /api/{feature}/{id}` for a single-id-param query, `GET /api/{feature}` for
+   a zero-param (list) query.
+6. **Templates** — `.sbn` (Scriban) files embedded as resources in `ArchitectLuna.Templates`.
+   `Templates/MediatR` and `Templates/Wolverine` hold the framework-specific pieces (the message
+   record's base interface, the handler shape); `Templates/Shared` holds the command/query
+   endpoint and the FluentValidation validator — both adapters render endpoints through the exact
+   same templates, so the generated HTTP surface (minimal-API `IEndpointDefinition` mapping, verbs,
+   route binding) is identical no matter which adapter produced it. Only the injected dispatcher
+   (`ISender` vs `IMessageBus`) and the handler internals differ.
+7. **Protected-region merge** — `ProtectedRegionMerger` scans an existing file for
+   `// <architect:region name="...">...// </architect:region>` blocks and splices their content
+   into the freshly rendered file before writing, so hand-written logic inside a handler body
+   survives regeneration even as the surrounding scaffolding (usings, class name, signature)
+   stays in sync with the model.
+8. **Persistence binding** — before rendering a command/query's Handler file, the adapter asks the
+   configured `IPersistenceGenerator` (`ArchitectLuna.Core/Generation/IPersistenceGenerator.cs`)
+   for a `HandlerBinding`: the body statements plus at most one dependency to inject (a DbContext,
+   an `IDocumentSession`, etc — see `HandlerBinding.cs`'s doc comment for why it's capped at one).
+   `NullPersistenceGenerator` (the `--persistence none` default) returns the original
+   `throw new NotImplementedException();` placeholder unchanged, so this is fully backward
+   compatible. A provider also gets two file-generation hooks: `GenerateEntityPersistence`
+   (once per entity — a domain class, an EF `IEntityTypeConfiguration<T>`, etc.) and
+   `GenerateSolutionPersistence` (once per `generate` run, given every entity across every
+   feature — for a DbContext that needs one `DbSet<T>` per entity; providers with nothing
+   solution-level to emit, like Marten, return an empty list).
+9. **Write + manifest** — `FileWriter` performs the merge-then-write for each `GeneratedFile` and
+   records every path ever generated in `.architect/manifest.json`, laying groundwork for future
+   cleanup tooling (e.g. detecting files that used to be generated but no longer are).
 
-## Determinism guarantees
+## Component map
 
-Determinism is the core product requirement, not an implementation detail.
-Concretely:
-
-- **No hidden inputs.** Generation is a pure function of `(spec content,
-  template pack version)`. No timestamps, machine-generated GUIDs, random
-  seeds, or environment variables are permitted in template output unless
-  they are explicit, spec-provided values.
-- **Canonical ordering.** Every collection that affects output (files,
-  members, usings, properties) is sorted deterministically before rendering
-  — never emitted in hash-map or file-system enumeration order.
-- **Content-addressed template packs.** Each template pack is versioned and
-  hashed. A spec pins the exact pack version it was generated with, so
-  regenerating months later with the same pin reproduces the same bytes even
-  if the pack has since moved on.
-- **Idempotent regeneration.** Running generation twice against the same
-  spec and pack produces identical output. This is a testable property
-  (`invero doctor` runs generation twice and diffs the result) and is part
-  of CI for every template pack.
-- **Generated vs. hand-authored separation.** Generated files are either
-  fully owned by the tool (safe to overwrite every run) or contain clearly
-  marked extension points (partial classes, designated regions) so
-  regeneration never silently discards developer edits. The tool refuses to
-  overwrite a hand-edited region without an explicit merge step.
-
-## Components
-
-| Component | Responsibility |
+| Project | Responsibility |
 |---|---|
-| `InveroArchitect.Core` | Spec schema, parser, IR model. No knowledge of any specific architecture pattern. |
-| `InveroArchitect.Generation` | Rendering pipeline, canonical formatter integration, idempotency/diff checking, file writer. |
-| `InveroArchitect.Templates.*` | One package per pattern (Clean Architecture, Vertical Slice, Entities). Each maps IR → files using the shared engine. Independently versioned. |
-| `InveroArchitect.Cli` | `invero` command-line entry point: `generate`, `new`, `doctor`, `diff`. |
+| `ArchitectLuna.Core` | Intent Model, naming/route inference, validation, protected-region merge, manifest, `IFrameworkAdapter`/`IPersistenceGenerator` contracts. No knowledge of MediatR/Wolverine/EF Core/Marten/Scriban. |
+| `ArchitectLuna.Templates` | Scriban engine wrapper + embedded `.sbn` templates. No knowledge of the CLI or the Intent Model's YAML shape. |
+| `ArchitectLuna.Adapters.MediatR` / `ArchitectLuna.Adapters.Wolverine` | Implement `IFrameworkAdapter`; each depends only on `Core` and `Templates`, not on each other, so a third-party adapter can be added the same way without touching existing ones. |
+| `ArchitectLuna.Persistence.EfCore` / `ArchitectLuna.Persistence.Marten` | Implement `IPersistenceGenerator`; same independence property as the messaging adapters — a provider only ever adds new files, it never needs to modify another provider or adapter. |
+| `ArchitectLuna.Ui` | Razor Pages app built directly on `Core` (no CLI dependency for model reads/writes, confirming Core's zero-console-I/O boundary is real) plus a runtime-only shell-out to the built CLI for `generate`. |
+| `ArchitectLuna.Cli` | Spectre.Console.Cli entry point (`new`, `add feature/entity/command/query`, `generate`) plus `SolutionScaffolder`, which shells out to the real `dotnet` CLI for `.sln`/project creation and package references so version resolution always comes from the live NuGet feed. `AdapterRegistry`/`PersistenceRegistry` resolve `--adapter`/`--persistence` strings to concrete implementations — this is the one place that knows about every adapter and provider by name. |
 
-Template packs depend on `Core` and `Generation`; they do not depend on each
-other. This keeps "generic multi-target templates" (a pack authored outside
-this repo) possible: anyone can implement the same IR → files contract.
+## Why Scriban, and a known environment gotcha
 
-## Template engine choice
+Templates are authored in [Scriban](https://github.com/scriban/scriban), a sandboxed templating
+language with no ambient file/network access — the only way a template can affect its output is
+through the view model it's given. `TemplateEngine` renders with `StandardMemberRenamer`, so a
+C# `CommandName` property is referenced in a template as `{{ command_name }}`.
 
-Templates are authored with [Scriban](https://github.com/scriban/scriban) (a
-sandboxed, side-effect-free .NET templating language) rather than T4 or
-runtime code generation. Scriban templates cannot execute arbitrary .NET code
-or touch ambient state, which is what makes the purity guarantee in step 4
-enforceable rather than just a convention.
+One gotcha worth knowing if you add new `.sbn` files: MSBuild infers satellite-assembly cultures
+from filenames, and a file like `Handler.cs.sbn` gets misread as culture `cs` (Czech) — the
+resource silently ends up in a separate satellite assembly instead of the main one, and
+`GetManifestResourceNames()` on the main assembly returns nothing at runtime. The fix, already
+applied in `ArchitectLuna.Templates.csproj`, is `WithCulture="false"` on the `EmbeddedResource`
+item.
 
-## Spec format (sketch)
+## Why shell out to `dotnet` for scaffolding
 
-```yaml
-architecture: clean-architecture   # or: vertical-slice, entities-only
-namespace: Invero.Sample
+`new api` calls `dotnet new sln`, `dotnet sln add`, and `dotnet add package` as real subprocesses
+rather than hand-writing `.sln`/`.csproj` XML with pinned package versions. This means a scaffolded
+solution always resolves current NuGet versions and always has a `.sln`/`.slnx` MSBuild itself
+considers valid, at the cost of requiring the `dotnet` CLI to be on `PATH` when running
+`architect-luna new api`.
 
-entities:
-  - name: Order
-    properties:
-      - { name: Id, type: Guid }
-      - { name: CustomerId, type: Guid }
-      - { name: Status, type: OrderStatus }
-    invariants:
-      - "Status transitions only forward: Placed -> Paid -> Shipped -> Delivered"
+## Two more gotchas, found while wiring up persistence
 
-useCases:
-  - name: PlaceOrder
-    kind: command
-    entity: Order
-```
-
-The exact schema will be finalized during Phase 2 (see `ROADMAP.md`); this
-sketch establishes the shape: entities and use cases are first-class,
-architecture style is a top-level switch, and the spec has no
-generation-run-specific fields (no timestamps, no output paths baked in).
+- **A handler with a persistence-backed body must be `async`.** Both `Handler.cs.sbn` templates
+  declare `Handle` as `async Task<T>` unconditionally (not just when persistence is configured),
+  because a `HandlerBinding` body uses `await`/`SaveChangesAsync`, and a non-`async` method can't
+  contain `await`. The `--persistence none` placeholder (`throw new NotImplementedException();`)
+  still compiles fine inside an `async` method — it just never hits an `await`.
+- **Wolverine's static `Handle` method must declare `CancellationToken cancellationToken`
+  explicitly.** Unlike MediatR (which always passes one), Wolverine only supplies parameters a
+  handler method actually declares — omitting it compiles for a `--persistence none` handler
+  (nothing references it) and only fails once a `HandlerBinding` body starts calling
+  `SaveChangesAsync(cancellationToken)`. Both `Handler.cs.sbn` templates now declare it
+  unconditionally so this can't regress silently for one adapter while the other is fine.
