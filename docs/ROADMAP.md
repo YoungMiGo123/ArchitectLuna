@@ -32,6 +32,12 @@
   model viewer, an add-entity form using Core directly (no CLI shell-out for model edits), and a
   generate button that shells out to the built CLI. Confirms Core's zero-console-I/O boundary is
   real, not aspirational — the UI never needed to touch `ArchitectLuna.Cli`'s own code.
+- **Package `architect-luna` as a real `dotnet tool`.** `ArchitectLuna.Cli.csproj` has
+  `PackAsTool`/`ToolCommandName`/`PackageId`/`Version`/`PackageReadmeFile` set; `dotnet pack` +
+  `dotnet tool install --global --add-source ./nupkg architect-luna` verified end to end — bare
+  `architect-luna` command, run from an arbitrary directory, scaffolds and generates a real
+  buildable solution. See README's "Installing" section. Publishing to a real feed (GitHub
+  Packages / NuGet.org) for install-without-a-checkout is a natural next step, not yet done.
 
 ## Near-term — get to a demoable prototype
 
@@ -56,9 +62,10 @@
   disconnected tools.
 - **`SchemaVersion` migration.** `ArchitectModel.SchemaVersion` exists but nothing reads it yet;
   once the YAML shape needs to change, this is what upgrades an older `model.yaml` in place.
-- **Package `architect-luna` as a real `dotnet tool`.** `ArchitectLuna.Cli.csproj` already sets
-  `PackAsTool`/`ToolCommandName`; `dotnet pack` + publish (e.g. to a private feed or NuGet.org) so
-  it installs via `dotnet tool install` instead of being run from a source checkout.
+- **Publish the packaged tool to a real feed.** GitHub Packages (natural fit, repo's already
+  there) or NuGet.org, so `dotnet tool install --global architect-luna` works for anyone without
+  a source checkout — see README's "Installing" section for the manual/local-feed version that
+  already works today.
 
 ## Longer-term
 

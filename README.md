@@ -28,6 +28,43 @@ One `add entity` call gives you a full Create/Read/Update/Delete/List slice. You
 bespoke commands/queries beyond CRUD with `add command` / `add query` when you need something an
 entity's standard shape doesn't cover.
 
+## Installing
+
+`ArchitectLuna.Cli.csproj` is already set up as a [.NET tool](https://learn.microsoft.com/dotnet/core/tools/global-tools)
+(`PackAsTool`, command name `architect-luna`). No publishing anywhere is required to use it on your
+own machine:
+
+```bash
+# From the repo root — build a local package
+dotnet pack src/ArchitectLuna.Cli/ArchitectLuna.Cli.csproj -c Release -o ./nupkg
+
+# Install it globally from that local folder (no NuGet feed involved)
+dotnet tool install --global --add-source ./nupkg architect-luna
+
+# Now it's a real command, usable from any directory
+cd ~/wherever
+architect-luna new api MyApp --adapter mediatr --persistence efcore-postgres
+```
+
+`dotnet tool install --global` puts it on your `PATH` at `~/.dotnet/tools` (the installer tells you
+if that directory isn't already on `PATH` and gives you the one-liner to add it). To pick up code
+changes after pulling a newer version of this repo: `dotnet tool uninstall --global architect-luna`,
+re-run `dotnet pack`, then `dotnet tool install` again — or use `dotnet tool update --global
+--add-source ./nupkg architect-luna` to do both in one step.
+
+To make it installable on *other* machines (teammates, CI) without them needing this repo checked
+out, publish the package to a feed instead of installing from a local folder — e.g.
+[GitHub Packages](https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-nuget-registry)
+(natural fit since this repo is already on GitHub) or [NuGet.org](https://www.nuget.org/) for public
+distribution:
+
+```bash
+dotnet nuget push ./nupkg/architect-luna.0.1.0.nupkg --source <your-feed> --api-key <key>
+```
+
+then anyone can `dotnet tool install --global architect-luna` (with that feed configured) instead
+of building from source.
+
 ## Quick start
 
 ```bash

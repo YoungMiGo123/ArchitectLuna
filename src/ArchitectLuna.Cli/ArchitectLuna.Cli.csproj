@@ -11,10 +11,22 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>architect-luna</ToolCommandName>
     <InvariantGlobalization>true</InvariantGlobalization>
+
+    <PackageId>architect-luna</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>ArchitectLuna contributors</Authors>
+    <Description>CLI code generator for .NET APIs — entity-driven CRUD scaffolding with pluggable messaging (MediatR/Wolverine) and persistence (EF Core/Marten) backends.</Description>
+    <PackageTags>codegen;scaffolding;cli;dotnet-tool;mediatr;wolverine;efcore;marten</PackageTags>
+    <RepositoryUrl>https://github.com/YoungMiGo123/ArchitectLuna</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Spectre.Console.Cli" Version="0.55.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
