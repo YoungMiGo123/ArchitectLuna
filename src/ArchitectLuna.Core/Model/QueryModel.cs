@@ -24,4 +24,12 @@ public sealed class QueryModel
     /// Explicit route override. Null means the adapter infers a default route.
     /// </summary>
     public string? Route { get; init; }
+
+    /// <summary>
+    /// Set by <see cref="CrudSynthesizer"/> to the owning entity's name; null for a hand-authored
+    /// query. A configured <c>IPersistenceGenerator</c> uses this to know which DbSet/document
+    /// type a handler should read from — a query with no entity link always gets the placeholder
+    /// NotImplementedException body, persistence or not.
+    /// </summary>
+    public string? EntityName { get; init; }
 }

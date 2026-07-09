@@ -27,4 +27,25 @@ public sealed class MessageRenderModel
     public required IReadOnlyList<MessageFieldRenderModel> Fields { get; init; }
 
     public required IReadOnlyList<MessageFieldRenderModel> ResultFields { get; init; }
+
+    /// <summary>
+    /// Initial content of the handler's protected region — "throw new NotImplementedException();"
+    /// when no persistence provider is configured (or this message has no entity link), or real
+    /// CRUD statements otherwise. Only used by Handler.cs.sbn; ignored by Message.cs.sbn.
+    /// </summary>
+    public required string HandlerBody { get; init; }
+
+    /// <summary>Extra using directives the handler body needs (e.g. "Microsoft.EntityFrameworkCore").</summary>
+    public required IReadOnlyList<string> HandlerUsings { get; init; }
+
+    /// <summary>
+    /// True when the handler needs one dependency injected (a DbContext, an IDocumentSession,
+    /// etc.) — MediatR gets it via constructor injection, Wolverine via an extra static-method
+    /// parameter (Wolverine's own convention). Null/false means a parameterless handler.
+    /// </summary>
+    public bool HasHandlerDependency { get; init; }
+
+    public string? HandlerDependencyType { get; init; }
+
+    public string? HandlerDependencyParam { get; init; }
 }

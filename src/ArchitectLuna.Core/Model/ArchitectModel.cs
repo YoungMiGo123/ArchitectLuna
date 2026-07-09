@@ -16,5 +16,11 @@ public sealed class ArchitectModel
     /// </summary>
     public required string Adapter { get; init; }
 
+    /// <summary>
+    /// Persistence backend for generated CRUD handlers. Defaults to None, which preserves the
+    /// original placeholder-body behavior.
+    /// </summary>
+    public PersistenceProvider Persistence { get; init; } = PersistenceProvider.None;
+
     public List<FeatureModel> Features { get; init; } = new();
 }

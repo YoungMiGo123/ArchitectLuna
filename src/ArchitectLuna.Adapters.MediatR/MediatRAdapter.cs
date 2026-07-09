@@ -11,6 +11,10 @@ namespace ArchitectLuna.Adapters.MediatR;
 /// Templates/Shared) — HTTP mapping always goes through the same minimal-API IEndpointDefinition
 /// pattern regardless of backend. Only the Message/Handler shape is MediatR-specific here
 /// (IRequest/IRequestHandler), because that's an unavoidable framework requirement.
+///
+/// Handler bodies come from the configured <see cref="IPersistenceGenerator"/> — defaults to
+/// <see cref="NullPersistenceGenerator"/> (the original NotImplementedException placeholder) when
+/// none is supplied, so existing callers are unaffected.
 /// </summary>
 public sealed class MediatRAdapter : IFrameworkAdapter
 {
@@ -21,6 +25,12 @@ public sealed class MediatRAdapter : IFrameworkAdapter
 
     private readonly TemplateEngine _templateEngine = new();
     private readonly EmbeddedTemplateProvider _templateProvider = new();
+    private readonly IPersistenceGenerator _persistence;
+
+    public MediatRAdapter(IPersistenceGenerator? persistence = null)
+    {
+        _persistence = persistence ?? new NullPersistenceGenerator();
+    }
 
     public string Name => AdapterKey;
 
@@ -45,6 +55,8 @@ public sealed class MediatRAdapter : IFrameworkAdapter
         var fields = command.Fields.Select(f => new MessageFieldRenderModel { Name = f.Name, Type = f.Type }).ToList();
         var resultFields = new List<MessageFieldRenderModel> { new() { Name = "Id", Type = "Guid" } };
 
+        var binding = BindCommand(context, feature, command);
+
         var messageModel = new MessageRenderModel
         {
             Namespace = ns,
@@ -55,6 +67,11 @@ public sealed class MediatRAdapter : IFrameworkAdapter
             ResultType = resultName,
             Fields = fields,
             ResultFields = resultFields,
+            HandlerBody = binding.Body,
+            HandlerUsings = binding.Usings,
+            HasHandlerDependency = binding.DependencyType is not null,
+            HandlerDependencyType = binding.DependencyType,
+            HandlerDependencyParam = binding.DependencyParam,
         };
 
         var hasRouteId = command.Kind is CommandKind.Update or CommandKind.Delete;
@@ -130,6 +147,8 @@ public sealed class MediatRAdapter : IFrameworkAdapter
 
         var resultType = query.IsCollection ? $"IReadOnlyList<{resultName}>" : resultName;
 
+        var binding = BindQuery(context, feature, query);
+
         var messageModel = new MessageRenderModel
         {
             Namespace = ns,
@@ -140,6 +159,11 @@ public sealed class MediatRAdapter : IFrameworkAdapter
             ResultType = resultType,
             Fields = parameters,
             ResultFields = resultFields,
+            HandlerBody = binding.Body,
+            HandlerUsings = binding.Usings,
+            HasHandlerDependency = binding.DependencyType is not null,
+            HandlerDependencyType = binding.DependencyType,
+            HandlerDependencyParam = binding.DependencyParam,
         };
 
         var isSingleRouteParam = query.Params.Count == 1 && query.Params[0].Name.EndsWith("Id", StringComparison.Ordinal);
@@ -177,6 +201,18 @@ public sealed class MediatRAdapter : IFrameworkAdapter
             new GeneratedFile($"{slicePath}/{handlerName}.cs", RenderAdapter("Handler.cs.sbn", messageModel)),
             new GeneratedFile($"{slicePath}/{endpointName}.cs", RenderShared("QueryEndpoint.cs.sbn", endpointModel)),
         };
+    }
+
+    private HandlerBinding BindCommand(GenerationContext context, FeatureModel feature, CommandModel command)
+    {
+        var entity = command.EntityName is null ? null : feature.Entities.FirstOrDefault(e => e.Name == command.EntityName);
+        return entity is null ? HandlerBinding.NotImplemented() : _persistence.BindCommandHandler(context, feature, entity, command);
+    }
+
+    private HandlerBinding BindQuery(GenerationContext context, FeatureModel feature, QueryModel query)
+    {
+        var entity = query.EntityName is null ? null : feature.Entities.FirstOrDefault(e => e.Name == query.EntityName);
+        return entity is null ? HandlerBinding.NotImplemented() : _persistence.BindQueryHandler(context, feature, entity, query);
     }
 
     private string RenderAdapter(string templateFileName, object model) => Render(AdapterKey, templateFileName, model);

@@ -22,6 +22,7 @@ public static class CrudSynthesizer
             Name = $"Create{entity.Name}",
             Kind = CommandKind.Create,
             Fields = CloneFields(entity.Fields),
+            EntityName = entity.Name,
         };
 
         var updateCommand = new CommandModel
@@ -31,6 +32,7 @@ public static class CrudSynthesizer
             Fields = new List<FieldModel> { new() { Name = "Id", Type = "Guid" } }
                 .Concat(CloneFields(entity.Fields))
                 .ToList(),
+            EntityName = entity.Name,
         };
 
         var deleteCommand = new CommandModel
@@ -38,6 +40,7 @@ public static class CrudSynthesizer
             Name = $"Delete{entity.Name}",
             Kind = CommandKind.Delete,
             Fields = new List<FieldModel> { new() { Name = "Id", Type = "Guid" } },
+            EntityName = entity.Name,
         };
 
         var getByIdQuery = new QueryModel
@@ -45,6 +48,7 @@ public static class CrudSynthesizer
             Name = $"Get{entity.Name}ById",
             Params = new List<ParamModel> { idParam },
             ResultFields = resultFields,
+            EntityName = entity.Name,
         };
 
         var getAllQuery = new QueryModel
@@ -53,6 +57,7 @@ public static class CrudSynthesizer
             Params = new List<ParamModel>(),
             ResultFields = resultFields,
             IsCollection = true,
+            EntityName = entity.Name,
         };
 
         return (
