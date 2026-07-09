@@ -22,5 +22,7 @@ public enum DatabaseApplyMode
 /// <summary>Database-related settings persisted on <see cref="ArchitectModel"/>.</summary>
 public sealed class DatabaseSettings
 {
-    public DatabaseApplyMode ApplyMode { get; init; } = DatabaseApplyMode.Manual;
+    // Mutable (not init-only): `config set database.applyMode` changes this on an
+    // already-deserialized model in place, unlike every other model edit which appends to a list.
+    public DatabaseApplyMode ApplyMode { get; set; } = DatabaseApplyMode.Manual;
 }
