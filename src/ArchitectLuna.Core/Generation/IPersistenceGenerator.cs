@@ -67,6 +67,27 @@ public interface IPersistenceGenerator
     /// </summary>
     IReadOnlyList<string> BuildServiceRegistration(GenerationContext context);
 
+    /// <summary>
+    /// Apply-mode-aware overload — only Marten currently varies registration by mode (toggling
+    /// <c>AutoCreateSchemaObjects</c>; EF Core's apply-mode behavior lives entirely in
+    /// <see cref="BuildStartupApplyLines"/>/`dotnet ef database update` instead). Defaults to the
+    /// plain overload so providers that don't care don't need to implement this separately.
+    /// </summary>
+    IReadOnlyList<string> BuildServiceRegistration(GenerationContext context, Model.DatabaseApplyMode applyMode) =>
+        BuildServiceRegistration(context);
+
     /// <summary>Using directives BuildServiceRegistration's lines need, e.g. "Microsoft.EntityFrameworkCore".</summary>
     IReadOnlyList<string> ServiceRegistrationUsings { get; }
+
+    /// <summary>
+    /// Statements spliced into Program.cs right after <c>var app = builder.Build();</c> when the
+    /// model's database apply mode is <see cref="Model.DatabaseApplyMode.OnStartup"/> — applying
+    /// EF Core migrations or Marten schema changes at process start
+    /// (docs/requirements/003-improvements.md §9, §11). Empty for providers with no schema to
+    /// apply (in-memory, none) — the default, so only providers that need this override it.
+    /// </summary>
+    IReadOnlyList<string> BuildStartupApplyLines(GenerationContext context) => Array.Empty<string>();
+
+    /// <summary>Using directives <see cref="BuildStartupApplyLines"/>'s lines need.</summary>
+    IReadOnlyList<string> StartupApplyUsings => Array.Empty<string>();
 }

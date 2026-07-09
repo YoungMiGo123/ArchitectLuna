@@ -39,9 +39,13 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
 
     public string Name => _kind == EfCoreProviderKind.Postgres ? "efcore-postgres" : "efcore-sqlserver";
 
+    // Microsoft.EntityFrameworkCore.Design goes on the same project as the concrete DbContext
+    // (Infrastructure, or the Api project itself for vertical slice) — that's the project
+    // `dotnet ef migrations add --project ...` targets, and EF's tooling refuses to run without
+    // this package referenced there (docs/requirements/003-improvements.md §10.1).
     public IReadOnlyList<string> RequiredPackages => _kind == EfCoreProviderKind.Postgres
-        ? new[] { "Microsoft.EntityFrameworkCore", "Npgsql.EntityFrameworkCore.PostgreSQL" }
-        : new[] { "Microsoft.EntityFrameworkCore", "Microsoft.EntityFrameworkCore.SqlServer" };
+        ? new[] { "Microsoft.EntityFrameworkCore", "Npgsql.EntityFrameworkCore.PostgreSQL", "Microsoft.EntityFrameworkCore.Design" }
+        : new[] { "Microsoft.EntityFrameworkCore", "Microsoft.EntityFrameworkCore.SqlServer", "Microsoft.EntityFrameworkCore.Design" };
 
     // Handler bodies (dbContext.Add/Find/Remove/SaveChangesAsync) and, under Clean Architecture,
     // the I{Solution}DbContext interface's DbSet<T> properties both live in Application — neither
@@ -49,6 +53,23 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
     public IReadOnlyList<string> ApplicationRequiredPackages { get; } = new[] { "Microsoft.EntityFrameworkCore" };
 
     public IReadOnlyList<string> ServiceRegistrationUsings { get; } = new[] { "Microsoft.EntityFrameworkCore" };
+
+    public IReadOnlyList<string> BuildStartupApplyLines(GenerationContext context)
+    {
+        // Always the concrete DbContext, never the I{Solution}DbContext abstraction used
+        // elsewhere under Clean Architecture — `.Database.Migrate()` is an EF Core DbContext
+        // member, not part of the hand-rolled interface (see DependencyTypeName's doc comment).
+        var dbContextName = DbContextName(context);
+        return new[]
+        {
+            "using (var scope = app.Services.CreateScope())",
+            "{",
+            $"    scope.ServiceProvider.GetRequiredService<{dbContextName}>().Database.Migrate();",
+            "}",
+        };
+    }
+
+    public IReadOnlyList<string> StartupApplyUsings { get; } = new[] { "Microsoft.Extensions.DependencyInjection" };
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
     {
@@ -71,6 +92,7 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         var files = new List<GeneratedFile>
         {
             new($"{context.Infrastructure.ProjectRoot}/{DbContextName(context)}.cs", RenderDbContext(context, entities)),
+            new($"{context.Infrastructure.ProjectRoot}/Persistence/{DbContextName(context)}Factory.cs", RenderDbContextFactory(context)),
         };
 
         if (context.HasSeparateInfrastructure)
@@ -264,6 +286,48 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         sb.AppendLine("    }");
         sb.Append('}');
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Lets EF Core tooling create a <c>DbContext</c> without going through the app's runtime DI
+    /// container (docs/requirements/003-improvements.md §10.2) — without this, `dotnet ef
+    /// migrations add`/`database update` fail trying to resolve `DbContextOptions&lt;T&gt;` from a
+    /// container that only exists once `WebApplication.CreateBuilder` runs. Uses the same local
+    /// development connection string shape as the scaffolded appsettings.Development.json; pass
+    /// `--connection` to `dotnet ef` to target a different database.
+    /// </summary>
+    private string RenderDbContextFactory(GenerationContext context)
+    {
+        var dbContextName = DbContextName(context);
+        var localConnectionString = _kind == EfCoreProviderKind.Postgres
+            ? $"Host=localhost;Database={context.RootNamespace.ToLowerInvariant()};Username=postgres;Password=postgres"
+            : $"Server=localhost;Database={context.RootNamespace};Trusted_Connection=True;TrustServerCertificate=True";
+        var useCall = _kind == EfCoreProviderKind.Postgres
+            ? $"optionsBuilder.UseNpgsql(\"{localConnectionString}\")"
+            : $"optionsBuilder.UseSqlServer(\"{localConnectionString}\")";
+
+        return $$"""
+        using Microsoft.EntityFrameworkCore;
+        using Microsoft.EntityFrameworkCore.Design;
+        using {{context.Infrastructure.RootNamespace}};
+
+        namespace {{context.Infrastructure.RootNamespace}}.Persistence;
+
+        /// <summary>
+        /// Design-time factory so `dotnet ef migrations add`/`database update` can create a
+        /// {{dbContextName}} without the app's runtime DI container. Uses the local development
+        /// connection string; pass --connection to target a different database.
+        /// </summary>
+        public sealed class {{dbContextName}}Factory : IDesignTimeDbContextFactory<{{dbContextName}}>
+        {
+            public {{dbContextName}} CreateDbContext(string[] args)
+            {
+                var optionsBuilder = new DbContextOptionsBuilder<{{dbContextName}}>();
+                {{useCall}};
+                return new {{dbContextName}}(optionsBuilder.Options);
+            }
+        }
+        """;
     }
 
     private static string RenderCreateBody(EntityModel entity, string resultName, string dbSetName)

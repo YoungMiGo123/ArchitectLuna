@@ -35,6 +35,16 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
 
     public IReadOnlyList<string> ServiceRegistrationUsings { get; } = new[] { "Marten" };
 
+    public IReadOnlyList<string> BuildStartupApplyLines(GenerationContext context) => new[]
+    {
+        "using (var scope = app.Services.CreateScope())",
+        "{",
+        "    await scope.ServiceProvider.GetRequiredService<IDocumentStore>().Storage.ApplyAllConfiguredChangesToDatabaseAsync();",
+        "}",
+    };
+
+    public IReadOnlyList<string> StartupApplyUsings { get; } = new[] { "Microsoft.Extensions.DependencyInjection" };
+
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
     {
         var documentPath = $"{context.Domain.ProjectRoot}/Documents/{entity.Name}.cs";
@@ -77,6 +87,25 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         return new[]
         {
             "services.AddMarten(options => options.Connection(configuration.GetConnectionString(\"Default\")!));",
+        };
+    }
+
+    /// <summary>
+    /// docs/requirements/003-improvements.md §11: manual/on-generate leave Marten's default
+    /// (only creates schema objects that don't exist yet); on-startup additionally allows Marten
+    /// to update existing schema objects, paired with the startup-time apply call in
+    /// <see cref="BuildStartupApplyLines"/>.
+    /// </summary>
+    public IReadOnlyList<string> BuildServiceRegistration(GenerationContext context, DatabaseApplyMode applyMode)
+    {
+        var autoCreate = applyMode == DatabaseApplyMode.OnStartup ? "AutoCreate.All" : "AutoCreate.CreateOrUpdate";
+        return new[]
+        {
+            "services.AddMarten(options =>",
+            "{",
+            "    options.Connection(configuration.GetConnectionString(\"Default\")!);",
+            $"    options.AutoCreateSchemaObjects = {autoCreate};",
+            "});",
         };
     }
 

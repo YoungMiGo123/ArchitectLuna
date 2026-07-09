@@ -1,5 +1,6 @@
 using System.Text;
 using ArchitectLuna.Core.Generation;
+using ArchitectLuna.Core.Model;
 
 namespace ArchitectLuna.Cli.Scaffolding;
 
@@ -16,7 +17,11 @@ namespace ArchitectLuna.Cli.Scaffolding;
 /// </summary>
 public static class ProgramCsBuilder
 {
-    public static string BuildProgramCs(GenerationContext context, string adapterName)
+    public static string BuildProgramCs(
+        GenerationContext context,
+        string adapterName,
+        IPersistenceGenerator? persistence = null,
+        DatabaseApplyMode applyMode = DatabaseApplyMode.Manual)
     {
         var usings = new List<string>
         {
@@ -25,6 +30,18 @@ public static class ProgramCsBuilder
             context.Application.RootNamespace,
             context.Infrastructure.RootNamespace,
         };
+
+        // Startup-time apply is baked into Program.cs at scaffold time — see the doc comment on
+        // IPersistenceGenerator.BuildStartupApplyLines for why this can't react to a later
+        // `config set database.applyMode on-startup` without a rescaffold or a manual Program.cs
+        // edit (Program.cs is deliberately never regenerated per feature).
+        var startupApplyLines = applyMode == DatabaseApplyMode.OnStartup && persistence is not null
+            ? persistence.BuildStartupApplyLines(context)
+            : Array.Empty<string>();
+        if (startupApplyLines.Count > 0)
+        {
+            usings.AddRange(persistence!.StartupApplyUsings);
+        }
 
         var wolverineHostLines = new List<string>();
         if (adapterName == "wolverine")
@@ -76,6 +93,16 @@ public static class ProgramCsBuilder
         sb.AppendLine();
         sb.AppendLine("var app = builder.Build();");
         sb.AppendLine();
+        if (startupApplyLines.Count > 0)
+        {
+            foreach (var line in startupApplyLines)
+            {
+                sb.AppendLine(line);
+            }
+
+            sb.AppendLine();
+        }
+
         sb.AppendLine("app.UseApiMiddleware();");
         sb.AppendLine("app.MapApiEndpoints();");
         sb.AppendLine();

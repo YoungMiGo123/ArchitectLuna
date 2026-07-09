@@ -1,4 +1,5 @@
 using ArchitectLuna.Core.Generation;
+using ArchitectLuna.Core.Model;
 
 namespace ArchitectLuna.Cli.Scaffolding;
 
@@ -17,7 +18,7 @@ namespace ArchitectLuna.Cli.Scaffolding;
 public static class FoundationFiles
 {
     /// <summary>Every foundation file for one scaffolded solution. Scaffold-time only — `generate` never rewrites these.</summary>
-    public static IReadOnlyList<GeneratedFile> BuildAll(GenerationContext context, string adapterName, IPersistenceGenerator persistence)
+    public static IReadOnlyList<GeneratedFile> BuildAll(GenerationContext context, string adapterName, IPersistenceGenerator persistence, DatabaseApplyMode applyMode = DatabaseApplyMode.Manual)
     {
         var files = new List<GeneratedFile>
         {
@@ -35,7 +36,7 @@ public static class FoundationFiles
 
             // Infrastructure-owned: technical implementations + persistence registration.
             new($"{context.Infrastructure.ProjectRoot}/Services/SystemDateTimeProvider.cs", BuildSystemDateTimeProvider(context)),
-            new($"{context.Infrastructure.ProjectRoot}/InfrastructureDependencyInjection.cs", BuildInfrastructureDependencyInjection(context, persistence)),
+            new($"{context.Infrastructure.ProjectRoot}/InfrastructureDependencyInjection.cs", BuildInfrastructureDependencyInjection(context, persistence, applyMode)),
 
             // Api-owned: HTTP concerns.
             new($"{context.Api.ProjectRoot}/Common/IEndpointDefinition.cs", BuildEndpointDefinitionInterface(context)),
@@ -276,7 +277,7 @@ public static class FoundationFiles
         }
         """;
 
-    public static string BuildInfrastructureDependencyInjection(GenerationContext context, IPersistenceGenerator persistence)
+    public static string BuildInfrastructureDependencyInjection(GenerationContext context, IPersistenceGenerator persistence, DatabaseApplyMode applyMode = DatabaseApplyMode.Manual)
     {
         var usings = new List<string>
         {
@@ -287,7 +288,7 @@ public static class FoundationFiles
         usings.Add($"{context.Application.RootNamespace}.Common.Abstractions");
         usings.Add($"{context.Infrastructure.RootNamespace}.Services");
 
-        var registrationLines = persistence.BuildServiceRegistration(context);
+        var registrationLines = persistence.BuildServiceRegistration(context, applyMode);
         var persistenceBlock = registrationLines.Count == 0
             ? string.Empty
             : "\n" + string.Join("\n", registrationLines.Select(l => $"        {l}"));

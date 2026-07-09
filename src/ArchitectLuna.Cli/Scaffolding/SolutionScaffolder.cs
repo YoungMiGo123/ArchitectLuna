@@ -23,7 +23,7 @@ namespace ArchitectLuna.Cli.Scaffolding;
 /// </summary>
 public static class SolutionScaffolder
 {
-    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "in-memory", SolutionLayout layout = SolutionLayout.CleanArchitecture, bool format = true)
+    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "in-memory", SolutionLayout layout = SolutionLayout.CleanArchitecture, bool format = true, DatabaseApplyMode applyMode = DatabaseApplyMode.Manual)
     {
         var root = Path.Combine(parentDirectory, solutionName);
         if (Directory.Exists(root))
@@ -40,13 +40,13 @@ public static class SolutionScaffolder
         File.WriteAllText(Path.Combine(root, "Directory.Build.props"), ProjectFiles.DirectoryBuildProps);
 
         var (apiCsprojRelative, context) = layout == SolutionLayout.CleanArchitecture
-            ? ScaffoldCleanArchitecture(root, solutionName, adapterName, adapter, persistence)
-            : ScaffoldVerticalSlice(root, solutionName, adapterName, adapter, persistence);
+            ? ScaffoldCleanArchitecture(root, solutionName, adapterName, adapter, persistence, applyMode)
+            : ScaffoldVerticalSlice(root, solutionName, adapterName, adapter, persistence, applyMode);
 
         // The production foundation: Result pattern, BaseEntity, abstractions, middleware, and
         // the extension methods Program.cs is built from. Scaffold-time only — `generate` never
         // rewrites these.
-        WriteGeneratedFiles(root, FoundationFiles.BuildAll(context, adapterName, persistence));
+        WriteGeneratedFiles(root, FoundationFiles.BuildAll(context, adapterName, persistence, applyMode));
 
         // So a fresh scaffold compiles before the first `generate`: AddInfrastructure already
         // references the DbContext/store type as soon as persistence is configured, so it must
@@ -71,6 +71,7 @@ public static class SolutionScaffolder
             Namespace = solutionName,
             Adapter = adapterName,
             Persistence = persistenceProvider,
+            Database = new DatabaseSettings { ApplyMode = applyMode },
             Layout = layout,
             Features = new List<FeatureModel>(),
         };
@@ -121,7 +122,7 @@ public static class SolutionScaffolder
         }
     }
 
-    private static (string ApiCsprojRelative, GenerationContext Context) ScaffoldVerticalSlice(string root, string solutionName, string adapterName, IFrameworkAdapter adapter, IPersistenceGenerator persistence)
+    private static (string ApiCsprojRelative, GenerationContext Context) ScaffoldVerticalSlice(string root, string solutionName, string adapterName, IFrameworkAdapter adapter, IPersistenceGenerator persistence, DatabaseApplyMode applyMode)
     {
         var apiProjectRelative = Path.Combine("src", $"{solutionName}.Api");
         var apiProjectDir = Path.Combine(root, apiProjectRelative);
@@ -131,7 +132,7 @@ public static class SolutionScaffolder
 
         var csprojPath = Path.Combine(apiProjectDir, $"{solutionName}.Api.csproj");
         File.WriteAllText(csprojPath, ProjectFiles.WebProject());
-        WriteApiProjectFiles(apiProjectDir, context, adapterName, PersistenceRegistry.ParseProvider(persistence.Name));
+        WriteApiProjectFiles(apiProjectDir, context, adapterName, PersistenceRegistry.ParseProvider(persistence.Name), persistence, applyMode);
 
         var apiCsprojRelative = Path.Combine(apiProjectRelative, $"{solutionName}.Api.csproj");
         RunDotnet(root, "sln", "add", apiCsprojRelative);
@@ -144,7 +145,7 @@ public static class SolutionScaffolder
         return (apiCsprojRelative, context);
     }
 
-    private static (string ApiCsprojRelative, GenerationContext Context) ScaffoldCleanArchitecture(string root, string solutionName, string adapterName, IFrameworkAdapter adapter, IPersistenceGenerator persistence)
+    private static (string ApiCsprojRelative, GenerationContext Context) ScaffoldCleanArchitecture(string root, string solutionName, string adapterName, IFrameworkAdapter adapter, IPersistenceGenerator persistence, DatabaseApplyMode applyMode)
     {
         var apiRelative = $"src/{solutionName}.Api";
         var applicationRelative = $"src/{solutionName}.Application";
@@ -191,7 +192,7 @@ public static class SolutionScaffolder
             $"../{solutionName}.Infrastructure/{solutionName}.Infrastructure.csproj",
             $"../{solutionName}.Contracts/{solutionName}.Contracts.csproj",
         }));
-        WriteApiProjectFiles(apiDir, context, adapterName, PersistenceRegistry.ParseProvider(persistence.Name));
+        WriteApiProjectFiles(apiDir, context, adapterName, PersistenceRegistry.ParseProvider(persistence.Name), persistence, applyMode);
 
         foreach (var (relative, csprojPath) in new[]
         {
@@ -237,9 +238,9 @@ public static class SolutionScaffolder
         "Microsoft.Extensions.Configuration.Abstractions",
     };
 
-    private static void WriteApiProjectFiles(string apiProjectDir, GenerationContext context, string adapterName, PersistenceProvider persistenceProvider)
+    private static void WriteApiProjectFiles(string apiProjectDir, GenerationContext context, string adapterName, PersistenceProvider persistenceProvider, IPersistenceGenerator persistence, DatabaseApplyMode applyMode)
     {
-        File.WriteAllText(Path.Combine(apiProjectDir, "Program.cs"), ProgramCsBuilder.BuildProgramCs(context, adapterName));
+        File.WriteAllText(Path.Combine(apiProjectDir, "Program.cs"), ProgramCsBuilder.BuildProgramCs(context, adapterName, persistence, applyMode));
 
         var propertiesDir = Path.Combine(apiProjectDir, "Properties");
         Directory.CreateDirectory(propertiesDir);

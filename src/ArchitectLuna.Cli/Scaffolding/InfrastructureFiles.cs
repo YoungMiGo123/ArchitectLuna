@@ -22,9 +22,12 @@ public static class InfrastructureFiles
 
         FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
         WORKDIR /app
+        RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
         COPY --from=build /app/publish .
         ENV ASPNETCORE_URLS=http://+:8080
         EXPOSE 8080
+        HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+          CMD curl -f http://localhost:8080/health || exit 1
         ENTRYPOINT ["dotnet", "{{solutionName}}.Api.dll"]
         """;
 
@@ -46,6 +49,12 @@ public static class InfrastructureFiles
                   - "8080:8080"
                 environment:
                   ASPNETCORE_ENVIRONMENT: Development
+                healthcheck:
+                  test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+                  interval: 30s
+                  timeout: 5s
+                  retries: 3
+                  start_period: 20s
             """;
         }
 
@@ -61,6 +70,12 @@ public static class InfrastructureFiles
                   - "1433:1433"
                 volumes:
                   - db-data:/var/opt/mssql
+                healthcheck:
+                  test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q \"SELECT 1\" || exit 1"]
+                  interval: 10s
+                  timeout: 5s
+                  retries: 10
+                  start_period: 20s
             """
             : $$"""
 
@@ -74,6 +89,12 @@ public static class InfrastructureFiles
                   - "5432:5432"
                 volumes:
                   - db-data:/var/lib/postgresql/data
+                healthcheck:
+                  test: ["CMD-SHELL", "pg_isready -U postgres"]
+                  interval: 10s
+                  timeout: 5s
+                  retries: 10
+                  start_period: 10s
             """;
 
         return $$"""
@@ -87,8 +108,15 @@ public static class InfrastructureFiles
             environment:
               ASPNETCORE_ENVIRONMENT: Development
               ConnectionStrings__Default: "{{DockerConnectionString(solutionName, provider)}}"
+            healthcheck:
+              test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+              interval: 30s
+              timeout: 5s
+              retries: 3
+              start_period: 20s
             depends_on:
-              - db
+              db:
+                condition: service_healthy
         {{dbServiceYaml}}
 
         volumes:

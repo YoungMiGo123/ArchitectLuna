@@ -1,4 +1,5 @@
 using ArchitectLuna.Cli.Scaffolding;
+using ArchitectLuna.Core.Model;
 using ArchitectLuna.Template.Tests.Infrastructure;
 using Xunit;
 
@@ -168,7 +169,7 @@ public sealed class ProductionFoundationTests
     [InlineData("in-memory", "services.AddSingleton<BillingService.Persistence.InMemoryStore>();")]
     [InlineData("efcore-postgres", "options.UseNpgsql(configuration.GetConnectionString(\"Default\"))")]
     [InlineData("efcore-sqlserver", "options.UseSqlServer(configuration.GetConnectionString(\"Default\"))")]
-    [InlineData("marten", "services.AddMarten(options => options.Connection(configuration.GetConnectionString(\"Default\")!));")]
+    [InlineData("marten", "options.Connection(configuration.GetConnectionString(\"Default\")!);")]
     public void AddInfrastructure_RegistersTheChosenPersistenceProvider(string persistence, string expectedRegistration)
     {
         var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence(persistence));
@@ -204,5 +205,52 @@ public sealed class ProductionFoundationTests
 
         var registration = GenerationTestHarness.ContentOf(files, $"{Api}/ApiDependencyInjection.cs");
         Assert.Contains("services.AddScoped<IUserContext, HttpUserContext>();", registration);
+    }
+
+    [Theory]
+    [InlineData("efcore-postgres", "Database.Migrate()")]
+    [InlineData("marten", "ApplyAllConfiguredChangesToDatabaseAsync")]
+    public void OnStartupApplyMode_AddsApplyCallToProgramCs(string persistence, string expectedCall)
+    {
+        var provider = GenerationTestHarness.Persistence(persistence);
+        var program = ProgramCsBuilder.BuildProgramCs(GenerationTestHarness.VerticalSliceContext(), "mediatr", provider, DatabaseApplyMode.OnStartup);
+
+        Assert.Contains(expectedCall, program);
+        Assert.Contains("var app = builder.Build();", program);
+        // The apply call must run after the app is built (needs a resolved DI scope) but before
+        // middleware/endpoints are wired up.
+        Assert.True(program.IndexOf("var app = builder.Build();", StringComparison.Ordinal) < program.IndexOf(expectedCall, StringComparison.Ordinal));
+        Assert.True(program.IndexOf(expectedCall, StringComparison.Ordinal) < program.IndexOf("app.UseApiMiddleware();", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("efcore-postgres")]
+    [InlineData("marten")]
+    [InlineData("in-memory")]
+    public void ManualApplyMode_DoesNotAddApplyCallToProgramCs(string persistence)
+    {
+        var provider = GenerationTestHarness.Persistence(persistence);
+        var program = ProgramCsBuilder.BuildProgramCs(GenerationTestHarness.VerticalSliceContext(), "mediatr", provider, DatabaseApplyMode.Manual);
+
+        Assert.DoesNotContain("Database.Migrate()", program);
+        Assert.DoesNotContain("ApplyAllConfiguredChangesToDatabaseAsync", program);
+    }
+
+    [Fact]
+    public void OnStartupApplyMode_MartenSetsAutoCreateSchemaObjectsToAll()
+    {
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("marten"), DatabaseApplyMode.OnStartup);
+        var content = GenerationTestHarness.ContentOf(files, $"{Api}/Persistence/InfrastructureDependencyInjection.cs");
+
+        Assert.Contains("options.AutoCreateSchemaObjects = AutoCreate.All;", content);
+    }
+
+    [Fact]
+    public void ManualApplyMode_MartenLeavesAutoCreateSchemaObjectsAtCreateOrUpdate()
+    {
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("marten"), DatabaseApplyMode.Manual);
+        var content = GenerationTestHarness.ContentOf(files, $"{Api}/Persistence/InfrastructureDependencyInjection.cs");
+
+        Assert.Contains("options.AutoCreateSchemaObjects = AutoCreate.CreateOrUpdate;", content);
     }
 }

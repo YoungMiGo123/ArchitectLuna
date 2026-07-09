@@ -52,6 +52,14 @@ public sealed class ConfigSetCommand : Command<ConfigSetCommandSettings>
         ModelSerializer.Save(modelPath, model);
 
         AnsiConsole.MarkupLineInterpolated($"[green]Set {DatabaseApplyModeKey} = {settings.Value}.[/]");
+
+        if (applyMode == DatabaseApplyMode.OnStartup && (model.Persistence == PersistenceProvider.EfCorePostgres || model.Persistence == PersistenceProvider.EfCoreSqlServer || model.Persistence == PersistenceProvider.Marten))
+        {
+            AnsiConsole.MarkupLine(
+                "[yellow]Note: Program.cs is only written at scaffold time and is never regenerated. " +
+                "The startup-time apply call this mode adds won't appear until you re-scaffold, or you can add it to Program.cs by hand.[/]");
+        }
+
         return 0;
     }
 }

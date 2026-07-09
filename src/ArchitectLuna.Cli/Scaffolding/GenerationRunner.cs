@@ -95,7 +95,43 @@ public static class GenerationRunner
             SolutionScaffolder.TryRunDotnetFormat(root, model.SolutionName);
         }
 
+        if (model.Database.ApplyMode == DatabaseApplyMode.OnGenerate)
+        {
+            TryApplyOnGenerate(root, model, generationContext);
+        }
+
         AnsiConsole.MarkupLineInterpolated($"[green]Generated {fileCount} file(s) using the '{model.Adapter}' adapter (persistence: {model.Persistence}).[/]");
         return true;
+    }
+
+    /// <summary>
+    /// docs/requirements/003-improvements.md §9.1: `on-generate` applies database changes as part
+    /// of `generate` — best-effort only, since a local database may not be reachable and that must
+    /// not fail generation. EF Core runs `dotnet ef database update` (requires the `dotnet-ef`
+    /// tool and at least one migration to already exist); Marten has no CLI-side migration step —
+    /// its schema is applied lazily by the store itself, so `on-generate` behaves like `manual`
+    /// until the app actually runs (see <see cref="ArchitectLuna.Core.Generation.IPersistenceGenerator.BuildStartupApplyLines"/>
+    /// for the `on-startup` case, which does apply it).
+    /// </summary>
+    private static void TryApplyOnGenerate(string root, ArchitectModel model, GenerationContext generationContext)
+    {
+        if (model.Persistence is not (PersistenceProvider.EfCorePostgres or PersistenceProvider.EfCoreSqlServer))
+        {
+            return;
+        }
+
+        try
+        {
+            SolutionScaffolder.RunDotnet(
+                root,
+                "ef", "database", "update",
+                "--project", generationContext.Infrastructure.ProjectRoot.Replace('/', Path.DirectorySeparatorChar),
+                "--startup-project", generationContext.Api.ProjectRoot.Replace('/', Path.DirectorySeparatorChar));
+            AnsiConsole.MarkupLine("[green]Applied database changes ('dotnet ef database update').[/]");
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLineInterpolated($"[yellow]Warning: could not apply database changes automatically: {ex.Message}[/]");
+        }
     }
 }
