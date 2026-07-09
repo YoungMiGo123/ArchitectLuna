@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using ArchitectLuna.Cli.Adapters;
+using ArchitectLuna.Cli.Scaffolding;
 using ArchitectLuna.Core.Generation;
 using ArchitectLuna.Core.Manifest;
 using ArchitectLuna.Core.Model;
@@ -12,6 +14,10 @@ namespace ArchitectLuna.Cli.Commands;
 
 public sealed class GenerateCommandSettings : CommandSettings
 {
+    [CommandOption("--no-format")]
+    [Description("Skip running 'dotnet format' over the solution after generation.")]
+    [DefaultValue(false)]
+    public bool NoFormat { get; init; }
 }
 
 public sealed class GenerateCommand : Command<GenerateCommandSettings>
@@ -93,6 +99,11 @@ public sealed class GenerateCommand : Command<GenerateCommandSettings>
         }
 
         ManifestStore.Save(manifestPath, manifest);
+
+        if (!settings.NoFormat)
+        {
+            SolutionScaffolder.TryRunDotnetFormat(root, model.SolutionName);
+        }
 
         AnsiConsole.MarkupLineInterpolated($"[green]Generated {fileCount} file(s) using the '{model.Adapter}' adapter (persistence: {model.Persistence}).[/]");
         return 0;

@@ -23,7 +23,7 @@ namespace ArchitectLuna.Cli.Scaffolding;
 /// </summary>
 public static class SolutionScaffolder
 {
-    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "in-memory", SolutionLayout layout = SolutionLayout.CleanArchitecture)
+    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "in-memory", SolutionLayout layout = SolutionLayout.CleanArchitecture, bool format = true)
     {
         var root = Path.Combine(parentDirectory, solutionName);
         if (Directory.Exists(root))
@@ -85,7 +85,30 @@ public static class SolutionScaffolder
 
         TestProjectScaffolder.CreateApiTests(root, solutionName, apiCsprojRelative);
 
+        if (format)
+        {
+            TryRunDotnetFormat(root, solutionName);
+        }
+
         return root;
+    }
+
+    /// <summary>
+    /// Best-effort `dotnet format` over the whole solution. Never throws: a formatting failure
+    /// (e.g. `dotnet format` unavailable, or a transient restore issue) must not fail scaffolding
+    /// or generation, since the files it would have reformatted are already valid, buildable
+    /// output — formatting is a polish step, not a correctness gate.
+    /// </summary>
+    internal static void TryRunDotnetFormat(string root, string solutionName)
+    {
+        try
+        {
+            RunDotnet(root, "format", $"{solutionName}.sln", "--verbosity", "quiet");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Warning: 'dotnet format' failed and was skipped: {ex.Message}");
+        }
     }
 
     private static void WriteGeneratedFiles(string root, IReadOnlyList<GeneratedFile> files)

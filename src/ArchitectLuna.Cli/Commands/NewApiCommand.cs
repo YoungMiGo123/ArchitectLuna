@@ -26,6 +26,11 @@ public sealed class NewApiCommandSettings : CommandSettings
     [Description("Solution layout: clean-architecture (default; Api/Application/Domain/Infrastructure/Contracts projects) or vertical-slice (single Api project, features live inside it).")]
     [DefaultValue("clean-architecture")]
     public string Architecture { get; init; } = "clean-architecture";
+
+    [CommandOption("--no-format")]
+    [Description("Skip running 'dotnet format' over the scaffolded solution.")]
+    [DefaultValue(false)]
+    public bool NoFormat { get; init; }
 }
 
 public sealed class NewApiCommand : Command<NewApiCommandSettings>
@@ -54,7 +59,7 @@ public sealed class NewApiCommand : Command<NewApiCommandSettings>
 
         var layout = settings.Architecture == "clean-architecture" ? SolutionLayout.CleanArchitecture : SolutionLayout.VerticalSlice;
 
-        var root = SolutionScaffolder.Scaffold(Directory.GetCurrentDirectory(), settings.Name, settings.Adapter, settings.Persistence, layout);
+        var root = SolutionScaffolder.Scaffold(Directory.GetCurrentDirectory(), settings.Name, settings.Adapter, settings.Persistence, layout, format: !settings.NoFormat);
         AnsiConsole.MarkupLineInterpolated($"[green]Created {settings.Name} at {root} (adapter: {settings.Adapter}, persistence: {settings.Persistence}, architecture: {settings.Architecture}).[/]");
         return 0;
     }

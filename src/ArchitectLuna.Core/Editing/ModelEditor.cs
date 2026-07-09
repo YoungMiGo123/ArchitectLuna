@@ -123,6 +123,65 @@ public static class ModelEditor
         return EditResult.Ok();
     }
 
+    /// <summary>
+    /// Adds a field to an entity that already exists (docs/requirements/003-improvements.md §2.1,
+    /// §7). The entity's fields are the source every dependent command/query field list is
+    /// synthesized from (see <see cref="CrudSynthesizer"/>), so appending here and then
+    /// re-running the standard `generate` pipeline is what re-renders the entity class,
+    /// persistence config, validators, mappings, and handlers for every command/query that
+    /// carries this field — there is no separate "sync" data path to keep in step.
+    /// </summary>
+    public static EditResult AddFieldToEntity(ArchitectModel model, string featureName, string entityName, FieldModel field)
+    {
+        var feature = model.Features.FirstOrDefault(f => f.Name == featureName);
+        if (feature is null)
+        {
+            return EditResult.Fail($"Feature '{featureName}' does not exist. Run 'architect-luna add feature {featureName}' first.");
+        }
+
+        var entity = feature.Entities.FirstOrDefault(e => e.Name == entityName);
+        if (entity is null)
+        {
+            return EditResult.Fail(
+                $"Entity '{entityName}' does not exist in feature '{featureName}'. Create the entity first: " +
+                $"architect-luna add entity {featureName} {entityName} --field Name:Type");
+        }
+
+        if (entity.Fields.Any(f => f.Name == field.Name))
+        {
+            return EditResult.Fail($"Field '{field.Name}' already exists on entity '{entityName}'.");
+        }
+
+        entity.Fields.Add(field);
+
+        // Every CRUD-synthesized command/query that carries this entity's fields picks up the
+        // new field too, so the standard `generate` pipeline (re-rendering from the model) keeps
+        // every dependent artifact in sync once this edit is saved — see CrudSynthesizer for how
+        // those command/query field lists are derived from EntityModel.Fields.
+        foreach (var command in feature.Commands.Where(c => c.EntityName == entityName && c.Kind != CommandKind.Delete))
+        {
+            if (command.Fields.All(f => f.Name != field.Name))
+            {
+                // A fresh instance per command, not the same reference as entity.Fields' entry —
+                // sharing one FieldModel instance across multiple model lists would make the YAML
+                // serializer emit anchors/aliases for what should read as independent field lists.
+                command.Fields.Add(new FieldModel { Name = field.Name, Type = field.Type, Rules = new List<string>(field.Rules) });
+            }
+        }
+
+        // GetById/GetAll (CrudSynthesizer) return the entity's fields via ResultFields, not
+        // Params, so the new field must join every entity-backed query's result shape too.
+        foreach (var query in feature.Queries.Where(q => q.EntityName == entityName))
+        {
+            if (query.ResultFields.All(f => f.Name != field.Name))
+            {
+                query.ResultFields.Add(new ParamModel { Name = field.Name, Type = field.Type });
+            }
+        }
+
+        return EditResult.Ok();
+    }
+
     /// <summary>Bespoke queries are deliberately allowed without an entity (Ordering Rule 4).</summary>
     public static EditResult AddQuery(ArchitectModel model, string featureName, string name, List<ParamModel> parameters)
     {

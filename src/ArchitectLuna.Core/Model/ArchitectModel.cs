@@ -28,5 +28,12 @@ public sealed class ArchitectModel
     /// </summary>
     public SolutionLayout? Layout { get; init; }
 
+    /// <summary>
+    /// Controls when EF Core migrations / Marten schema changes get applied. Defaults to
+    /// <see cref="DatabaseApplyMode.Manual"/> so a fresh model never applies changes a developer
+    /// didn't ask for.
+    /// </summary>
+    public DatabaseSettings Database { get; init; } = new();
+
     public List<FeatureModel> Features { get; init; } = new();
 }

@@ -50,4 +50,37 @@ public sealed class ModelSerializerTests
         Assert.Equal("GreaterThan(0)", roundTripped.Features[0].Commands[0].Fields[0].Rules[0]);
         Assert.Equal("GetInvoiceById", roundTripped.Features[0].Queries[0].Name);
     }
+
+    [Fact]
+    public void Database_DefaultsToManualWhenOmitted()
+    {
+        var model = new ArchitectModel
+        {
+            SolutionName = "BillingService",
+            Namespace = "BillingService",
+            Adapter = "mediatr",
+            Layout = SolutionLayout.CleanArchitecture,
+        };
+
+        var roundTripped = ModelSerializer.Deserialize(ModelSerializer.Serialize(model));
+
+        Assert.Equal(DatabaseApplyMode.Manual, roundTripped.Database.ApplyMode);
+    }
+
+    [Fact]
+    public void Database_ApplyMode_RoundTrips()
+    {
+        var model = new ArchitectModel
+        {
+            SolutionName = "BillingService",
+            Namespace = "BillingService",
+            Adapter = "mediatr",
+            Layout = SolutionLayout.CleanArchitecture,
+            Database = new DatabaseSettings { ApplyMode = DatabaseApplyMode.OnStartup },
+        };
+
+        var roundTripped = ModelSerializer.Deserialize(ModelSerializer.Serialize(model));
+
+        Assert.Equal(DatabaseApplyMode.OnStartup, roundTripped.Database.ApplyMode);
+    }
 }
