@@ -14,6 +14,7 @@ public sealed class ModelSerializerTests
             SolutionName = "BillingService",
             Namespace = "BillingService",
             Adapter = "mediatr",
+            Layout = SolutionLayout.CleanArchitecture,
             Features = new List<FeatureModel>
             {
                 new()
@@ -43,6 +44,7 @@ public sealed class ModelSerializerTests
 
         Assert.Equal(model.SolutionName, roundTripped.SolutionName);
         Assert.Equal(model.Adapter, roundTripped.Adapter);
+        Assert.Equal(model.Layout, roundTripped.Layout);
         Assert.Single(roundTripped.Features);
         Assert.Equal("CreateInvoice", roundTripped.Features[0].Commands[0].Name);
         Assert.Equal("GreaterThan(0)", roundTripped.Features[0].Commands[0].Fields[0].Rules[0]);
