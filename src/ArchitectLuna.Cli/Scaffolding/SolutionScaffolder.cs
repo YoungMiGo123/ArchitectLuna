@@ -200,6 +200,15 @@ public static class SolutionScaffolder
             UseShellExecute = false,
         };
 
+        // Force a fresh MSBuild process per call instead of connecting to a long-lived, reused
+        // node: `new api` runs a burst of ~20 short-lived `dotnet` subprocess calls, and if an
+        // MSBuild worker node from an earlier, differently-terminated process (e.g. one killed
+        // out from under it) is still registered for reuse, a later call can hang indefinitely
+        // waiting on a handshake with a node that will never answer. One-shot CLI automation like
+        // this gets nothing from node reuse (a pure warm-start optimization for interactive local
+        // dev loops) and is exactly the scenario that pattern is unsafe for.
+        psi.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+
         foreach (var arg in arguments)
         {
             psi.ArgumentList.Add(arg);

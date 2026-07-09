@@ -21,6 +21,11 @@ public static class CliRunner
             UseShellExecute = false,
         };
 
+        // See SolutionScaffolder.RunDotnet's doc comment: forces a fresh MSBuild process instead
+        // of risking a hang reusing a stale/orphaned node, for any command this ends up running
+        // (architect-luna itself shells out to `dotnet` for `new api`).
+        psi.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+
         psi.ArgumentList.Add(cliDllPath);
         foreach (var arg in arguments)
         {
