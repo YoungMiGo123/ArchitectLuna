@@ -12,6 +12,8 @@ public sealed class NullPersistenceGenerator : IPersistenceGenerator
 
     public IReadOnlyList<string> RequiredPackages { get; } = Array.Empty<string>();
 
+    public IReadOnlyList<string> ApplicationRequiredPackages { get; } = Array.Empty<string>();
+
     public IReadOnlyList<string> ProgramCsUsings { get; } = Array.Empty<string>();
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity) =>
@@ -26,5 +28,5 @@ public sealed class NullPersistenceGenerator : IPersistenceGenerator
     public HandlerBinding BindQueryHandler(GenerationContext context, FeatureModel feature, EntityModel entity, QueryModel query) =>
         HandlerBinding.NotImplemented();
 
-    public IReadOnlyList<string> BuildProgramCsRegistration(string solutionName) => Array.Empty<string>();
+    public IReadOnlyList<string> BuildProgramCsRegistration(GenerationContext context) => Array.Empty<string>();
 }

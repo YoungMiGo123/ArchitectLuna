@@ -39,6 +39,8 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
 
     public IReadOnlyList<string> RequiredPackages { get; } = Array.Empty<string>();
 
+    public IReadOnlyList<string> ApplicationRequiredPackages { get; } = Array.Empty<string>();
+
     public IReadOnlyList<string> ProgramCsUsings { get; } = Array.Empty<string>();
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
@@ -49,11 +51,10 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
 
     public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities)
     {
-        if (entities.Count == 0)
-        {
-            return Array.Empty<GeneratedFile>();
-        }
-
+        // Always emits the store (it's generic — Save<T>/Find<T>/etc. — so it needs no per-entity
+        // content) rather than only once an entity exists: Program.cs references this type
+        // unconditionally as soon as in-memory persistence is configured, so the freshly scaffolded
+        // solution (before the first `generate`) needs it to already exist and compile.
         var files = new List<GeneratedFile>
         {
             new($"{context.Infrastructure.ProjectRoot}/{StoreClassName}.cs", RenderStoreClass(context)),
@@ -95,14 +96,23 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
         return new HandlerBinding(body, DependencyTypeName(context), "store", HandlerUsings(context));
     }
 
-    public IReadOnlyList<string> BuildProgramCsRegistration(string solutionName)
+    public IReadOnlyList<string> BuildProgramCsRegistration(GenerationContext context)
     {
-        // Fully qualified rather than relying on a "using {solutionName}.Persistence;" being
-        // present in Program.cs — keeps this independent of whichever usings the caller composes.
-        return new[]
+        // Fully qualified rather than relying on a "using ...;" being present in Program.cs —
+        // keeps this independent of whichever usings the caller composes.
+        var qualifiedStoreName = $"{context.Infrastructure.RootNamespace}.{StoreClassName}";
+        var lines = new List<string>
         {
-            $"builder.Services.AddSingleton<{solutionName}.Persistence.{StoreClassName}>();",
+            $"builder.Services.AddSingleton<{qualifiedStoreName}>();",
         };
+
+        if (context.HasSeparateInfrastructure)
+        {
+            var qualifiedInterfaceName = $"{context.Application.RootNamespace}.Persistence.{StoreInterfaceName}";
+            lines.Add($"builder.Services.AddSingleton<{qualifiedInterfaceName}>(sp => sp.GetRequiredService<{qualifiedStoreName}>());");
+        }
+
+        return lines;
     }
 
     private static string DependencyTypeName(GenerationContext context) =>

@@ -26,6 +26,11 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
 
     public IReadOnlyList<string> RequiredPackages { get; } = new[] { "Marten" };
 
+    // Handler bodies (session.Store/Load/Query/SaveChangesAsync, IDocumentSession) live in the
+    // Application project, so it needs the same single package Infrastructure does — Marten has no
+    // separate "abstractions-only" package the way EF Core does.
+    public IReadOnlyList<string> ApplicationRequiredPackages { get; } = new[] { "Marten" };
+
     public IReadOnlyList<string> ProgramCsUsings { get; } = new[] { "Marten" };
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
@@ -63,7 +68,7 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         return new HandlerBinding(body, "IDocumentSession", "session", HandlerUsings(context));
     }
 
-    public IReadOnlyList<string> BuildProgramCsRegistration(string solutionName)
+    public IReadOnlyList<string> BuildProgramCsRegistration(GenerationContext context)
     {
         return new[]
         {

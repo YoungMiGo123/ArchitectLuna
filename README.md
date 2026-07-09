@@ -2,16 +2,20 @@
 
 ArchitectLuna is a CLI code generator for .NET APIs — think "Intent Architect Lite." A small
 YAML **Intent Model** (`.architect/model.yaml`) describes a solution's features and entities;
-`architect-luna generate` turns that into a working vertical-slice API: commands, handlers,
-validators, and minimal-API endpoints — with real persistence wired in if you ask for it.
+`architect-luna generate` turns that into a working API: commands, handlers, validators, and
+minimal-API endpoints — with real persistence wired in if you ask for it.
 
 It supports two interchangeable backend adapters — **MediatR** and **Wolverine** — that produce
-different implementations from the *same* model, and four interchangeable persistence providers —
+different implementations from the *same* model, four interchangeable persistence providers —
 **In-Memory**, **EF Core / Postgres**, **EF Core / SQL Server**, and **Marten** — that plug real
-CRUD into generated handlers. Switching `--adapter` changes how a request is dispatched (MediatR's
-`ISender` vs Wolverine's `IMessageBus`); switching `--persistence` changes how a handler talks to
-storage. Neither ever changes the route shape or HTTP surface, because every adapter renders
-endpoints from the same shared templates.
+CRUD into generated handlers, and two interchangeable solution layouts — **vertical slice** (one
+Api project, features live inside it) and **Clean Architecture** (Api/Application/Domain/
+Infrastructure as four real projects, dependency rule pointing inward). Switching `--adapter`
+changes how a request is dispatched (MediatR's `ISender` vs Wolverine's `IMessageBus`); switching
+`--persistence` changes how a handler talks to storage; switching `--architecture` changes which
+projects the generated files land in. None of the three ever changes the route shape or HTTP
+surface, because every adapter renders endpoints from the same shared templates regardless of
+where they end up on disk.
 
 **Handlers ship with real, working CRUD logic by default** — `--persistence in-memory` (the
 default for `new api`) needs no database, no connection string, and no extra NuGet package: a
@@ -20,6 +24,12 @@ Create/Read/Update/Delete against a process-lifetime store instead of throwing
 `NotImplementedException`. Swap in `efcore-postgres`, `efcore-sqlserver`, or `marten` when you need
 data to survive a restart — same generated shapes, same handler call sites, just a different
 storage backend wired in.
+
+Every scaffolded solution — either layout — compiles and runs immediately, with Swagger, health
+checks (`/health`), a global exception-mapping middleware, structured logging (Serilog), a
+Dockerfile + docker-compose.yml, `launchSettings.json`/`appsettings.json` split by environment, and
+an xUnit test project already wired up. There's nothing to bolt on by hand before the first
+`generate` run.
 
 ## The core idea: entity outwards
 
@@ -132,7 +142,8 @@ just runs `dotnet tool install --global architect-luna` — no `git clone`, no l
 
 ```bash
 # Scaffold a new API solution (creates the .sln, an ASP.NET Core minimal-API project,
-# and .architect/model.yaml). No flags needed for a working, database-free API:
+# Docker/Swagger/health-checks/logging, a test project, and .architect/model.yaml).
+# No flags needed for a working, database-free API:
 architect-luna new api BillingService
 cd BillingService
 
@@ -158,7 +169,24 @@ dotnet run --project src/BillingService.Api   # POST/GET/PUT/DELETE /api/invoice
 `--adapter` is `mediatr` or `wolverine` (default `mediatr`). `--persistence` is `in-memory`
 (default, zero setup), `none` (placeholder-only handlers), `efcore-postgres`, `efcore-sqlserver`,
 or `marten` — pass one explicitly to opt into a durable backend, e.g.
-`architect-luna new api BillingService --persistence efcore-postgres`.
+`architect-luna new api BillingService --persistence efcore-postgres`. `--architecture` is
+`vertical-slice` (default) or `clean-architecture`.
+
+```bash
+# Same model, four real projects instead of one — Api/Application/Domain/Infrastructure,
+# dependency rule pointing inward (Application never references Infrastructure directly; the
+# concrete DbContext implements an interface Application owns)
+architect-luna new api BillingService --adapter mediatr --persistence efcore-postgres --architecture clean-architecture
+```
+
+Run it locally, or with Docker (a `Dockerfile` and `docker-compose.yml` — including a Postgres/SQL
+Server service when persistence is configured — are already in the scaffold):
+
+```bash
+dotnet run --project src/BillingService.Api    # http://localhost:5080, Swagger at /swagger, health at /health
+# or
+docker compose up --build
+```
 
 Need something outside standard CRUD? Add it directly:
 
@@ -170,7 +198,12 @@ architect-luna add query Invoices SearchInvoices --param CustomerId:Guid --param
 ## What `generate` produces
 
 For an `Invoice` entity in an `Invoices` feature, `generate` renders (per adapter) one vertical
-slice per command/query under `src/{Solution}.Api/Features/Invoices/...`:
+slice per command/query. Where those files land depends on `--architecture`:
+
+- **vertical-slice** (default): everything under `src/{Solution}.Api/Features/Invoices/...`.
+- **clean-architecture**: the message/handler/validator under
+  `src/{Solution}.Application/Features/Invoices/...`, the endpoint under
+  `src/{Solution}.Api/Features/Invoices/...` — same file shape, split across the two projects.
 
 | Operation | Route | Files |
 |---|---|---|
@@ -181,13 +214,19 @@ slice per command/query under `src/{Solution}.Api/Features/Invoices/...`:
 | GetAll | `GET /api/invoices` | `GetAllInvoicesQuery.cs` (result wrapped as `IReadOnlyList<T>`), handler, endpoint |
 
 If `--persistence` is anything but `none`, `generate` additionally emits a domain/entity class per
-entity (`Persistence/Entities/Invoice.cs` for in-memory and EF Core, `Persistence/Documents/Invoice.cs`
-for Marten) and one solution-level file that every entity shares — `InMemoryStore.cs` for in-memory,
-a `DbContext` with a `DbSet<T>` per entity for EF Core (Marten needs neither, since `IDocumentSession`
-covers every document type generically). Handler bodies get the storage dependency injected —
-constructor injection for MediatR, an extra static-method parameter for Wolverine (its own
-convention) — and contain real Save/Find/Remove (in-memory), Add/Find/Remove/SaveChanges (EF Core),
-or Store/Load/Delete/Query (Marten) calls instead of a placeholder `throw`.
+entity (`Entities/Invoice.cs` for in-memory and EF Core, `Documents/Invoice.cs` for Marten) and one
+solution-level file that every entity shares — `InMemoryStore.cs` for in-memory, a `DbContext` with
+a `DbSet<T>` per entity for EF Core (Marten needs neither, since `IDocumentSession` covers every
+document type generically). For vertical slice these live under `src/{Solution}.Api/Persistence/`;
+for Clean Architecture, entity classes go to `src/{Solution}.Domain/` and the solution-level file
+to `src/{Solution}.Infrastructure/`. Under Clean Architecture, Application never references
+Infrastructure directly: for in-memory and EF Core, an `I{Solution}DbContext`/`IInMemoryStore`
+interface lives in Application (`Persistence/...`) and the concrete class in Infrastructure
+implements it — handlers depend on the interface, Program.cs (the Api project's composition root)
+wires the concrete type to it. Handler bodies get the storage dependency injected — constructor
+injection for MediatR, an extra static-method parameter for Wolverine (its own convention) — and
+contain real Save/Find/Remove (in-memory), Add/Find/Remove/SaveChanges (EF Core), or
+Store/Load/Delete/Query (Marten) calls instead of a placeholder `throw`.
 
 Every endpoint implements a shared `IEndpointDefinition` interface; `Program.cs` discovers and
 maps them by reflection, so it never needs to be regenerated as features grow.
@@ -225,9 +264,11 @@ tests/
                                       protected regions, model validation, YAML round-tripping
   ArchitectLuna.EndToEnd.Tests       Slow xUnit tests that shell out to the real built CLI and run
                                       `dotnet build` on generated output — every adapter x
-                                      persistence combination, plus protected-region regeneration
+                                      persistence combination in both layouts, plus
+                                      protected-region regeneration
 .github/workflows/ci.yml             Build+test on every push/PR, plus a scaffold/generate/build
-                                      smoke matrix across every adapter x persistence combination
+                                      smoke matrix across every adapter x persistence x
+                                      architecture combination
 ```
 
 Targets **.NET 10**. Build with `dotnet build ArchitectLuna.sln`, test the fast suite with
@@ -236,12 +277,12 @@ with `dotnet test ArchitectLuna.sln`.
 
 ## Status
 
-M1–M4 are done: every adapter × persistence combination generates a compiling solution end to end,
-verified by actually scaffolding and building sample projects (automated in
-`ArchitectLuna.EndToEnd.Tests` for every adapter × {none, in-memory, efcore-postgres,
-efcore-sqlserver, marten} combination, not just eyeballed by hand). Entity-driven CRUD synthesis,
-a zero-setup in-memory persistence provider (the `new api` default), real EF Core/Marten
-persistence, a CI pipeline, and a model-editing UI are all implemented — a freshly scaffolded
-solution has working Create/Read/Update/Delete endpoints with no external dependency required. See
-`docs/ROADMAP.md` for what's next (`adapter switch`, EF Core migrations, Clean Architecture
-layering as an alternative to vertical slice, additional adapters).
+M1–M4 are done: every adapter × persistence × architecture combination generates a compiling,
+production-ready-baseline solution end to end, verified by actually scaffolding and building
+sample projects (automated in `ArchitectLuna.EndToEnd.Tests`, not just eyeballed by hand).
+Entity-driven CRUD synthesis, a zero-setup in-memory persistence provider (the `new api` default),
+real EF Core/Marten persistence, Clean Architecture as an alternative to vertical slice,
+Docker/Swagger/health-checks/logging, a CI pipeline, and a model-editing UI are all implemented —
+a freshly scaffolded solution has working Create/Read/Update/Delete endpoints with no external
+dependency required, in either layout. See `docs/ROADMAP.md` for what's next (`adapter switch`,
+EF Core migrations, additional adapters, publishing the packaged tool to a real feed).

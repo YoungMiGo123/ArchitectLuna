@@ -11,10 +11,17 @@ namespace ArchitectLuna.Cli.Scaffolding;
 /// Scaffolds a brand-new API solution for `new api`. Shells out to the real `dotnet` CLI for
 /// .sln creation, project registration, and package references so version resolution always
 /// comes from the live NuGet feed instead of a hardcoded, potentially stale version pin.
+///
+/// Produces a solution that compiles and runs immediately, in either layout:
+/// <see cref="SolutionLayout.VerticalSlice"/> (one Api project, features live inside it) or
+/// <see cref="SolutionLayout.CleanArchitecture"/> (Api/Application/Domain/Infrastructure as four
+/// real projects, dependency rule pointing inward) — both get Swagger, health checks, exception
+/// middleware, DI, logging, Docker, and a test project, so there's nothing left to bolt on by hand
+/// before the first `generate` run.
 /// </summary>
 public static class SolutionScaffolder
 {
-    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "in-memory")
+    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "in-memory", SolutionLayout layout = SolutionLayout.VerticalSlice)
     {
         var root = Path.Combine(parentDirectory, solutionName);
         if (Directory.Exists(root))
@@ -28,30 +35,25 @@ public static class SolutionScaffolder
 
         Directory.CreateDirectory(root);
         RunDotnet(root, "new", "sln", "-n", solutionName);
+        File.WriteAllText(Path.Combine(root, "Directory.Build.props"), ProjectFiles.DirectoryBuildProps);
 
-        var apiProjectRelative = Path.Combine("src", $"{solutionName}.Api");
-        var apiProjectDir = Path.Combine(root, apiProjectRelative);
-        Directory.CreateDirectory(apiProjectDir);
+        var (apiCsprojRelative, context) = layout == SolutionLayout.CleanArchitecture
+            ? ScaffoldCleanArchitecture(root, solutionName, adapterName, adapter, persistence)
+            : ScaffoldVerticalSlice(root, solutionName, adapterName, adapter, persistence);
 
-        var csprojPath = Path.Combine(apiProjectDir, $"{solutionName}.Api.csproj");
-        File.WriteAllText(csprojPath, BuildCsproj());
-        File.WriteAllText(Path.Combine(apiProjectDir, "Program.cs"), BuildProgramCs(solutionName, adapterName, persistence));
-
-        var commonDir = Path.Combine(apiProjectDir, "Common");
-        Directory.CreateDirectory(commonDir);
-        File.WriteAllText(Path.Combine(commonDir, "IEndpointDefinition.cs"), BuildEndpointDefinitionInterface(solutionName));
-
-        if (persistenceProvider is not PersistenceProvider.None and not PersistenceProvider.InMemory)
+        // So a fresh scaffold compiles before the first `generate`: Program.cs already references
+        // the DbContext type as soon as EF Core persistence is configured, so it must already exist
+        // (with zero DbSets — `generate` re-renders it with real ones once entities are added).
+        foreach (var file in persistence.GenerateSolutionPersistence(context, Array.Empty<EntityReference>()))
         {
-            File.WriteAllText(Path.Combine(apiProjectDir, "appsettings.json"), BuildAppSettings(solutionName, persistenceProvider));
+            var fullPath = Path.Combine(root, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            File.WriteAllText(fullPath, file.Content);
         }
 
-        RunDotnet(root, "sln", "add", Path.Combine(apiProjectRelative, $"{solutionName}.Api.csproj"));
-
-        foreach (var package in adapter.RequiredPackages.Concat(persistence.RequiredPackages))
-        {
-            RunDotnet(root, "add", csprojPath, "package", package);
-        }
+        File.WriteAllText(Path.Combine(root, "Dockerfile"), InfrastructureFiles.Dockerfile(solutionName));
+        File.WriteAllText(Path.Combine(root, "docker-compose.yml"), InfrastructureFiles.DockerCompose(solutionName, persistenceProvider));
+        File.WriteAllText(Path.Combine(root, ".gitignore"), InfrastructureFiles.GitIgnoreContent);
 
         Directory.CreateDirectory(Path.Combine(root, ".architect"));
         var model = new ArchitectModel
@@ -60,143 +62,134 @@ public static class SolutionScaffolder
             Namespace = solutionName,
             Adapter = adapterName,
             Persistence = persistenceProvider,
+            Layout = layout,
             Features = new List<FeatureModel>(),
         };
         ModelSerializer.Save(Path.Combine(root, ".architect", "model.yaml"), model);
         ManifestStore.Save(Path.Combine(root, ".architect", "manifest.json"), new GenerationManifest());
 
-        File.WriteAllText(Path.Combine(root, ".gitignore"), GitIgnoreContent);
+        if (layout == SolutionLayout.CleanArchitecture)
+        {
+            TestProjectScaffolder.CreateApplicationTests(root, solutionName, Path.Combine("src", $"{solutionName}.Application", $"{solutionName}.Application.csproj"));
+        }
+
+        TestProjectScaffolder.CreateApiTests(root, solutionName, apiCsprojRelative);
 
         return root;
     }
 
-    private static string BuildCsproj() =>
-        """
-        <Project Sdk="Microsoft.NET.Sdk.Web">
-
-          <PropertyGroup>
-            <TargetFramework>net10.0</TargetFramework>
-            <ImplicitUsings>enable</ImplicitUsings>
-            <Nullable>enable</Nullable>
-          </PropertyGroup>
-
-        </Project>
-        """;
-
-    private static string BuildProgramCs(string solutionName, string adapterName, IPersistenceGenerator persistence)
+    private static (string ApiCsprojRelative, GenerationContext Context) ScaffoldVerticalSlice(string root, string solutionName, string adapterName, IFrameworkAdapter adapter, IPersistenceGenerator persistence)
     {
-        var (adapterUsings, bootstrapLines) = adapterName switch
+        var apiProjectRelative = Path.Combine("src", $"{solutionName}.Api");
+        var apiProjectDir = Path.Combine(root, apiProjectRelative);
+        Directory.CreateDirectory(apiProjectDir);
+
+        var context = GenerationContext.ForVerticalSlice(solutionName, $"src/{solutionName}.Api");
+
+        var csprojPath = Path.Combine(apiProjectDir, $"{solutionName}.Api.csproj");
+        File.WriteAllText(csprojPath, ProjectFiles.WebProject());
+        WriteApiProjectFiles(apiProjectDir, context, adapterName, persistence, PersistenceRegistry.ParseProvider(persistence.Name));
+
+        var apiCsprojRelative = Path.Combine(apiProjectRelative, $"{solutionName}.Api.csproj");
+        RunDotnet(root, "sln", "add", apiCsprojRelative);
+
+        foreach (var package in adapter.RequiredPackages.Concat(persistence.RequiredPackages).Concat(SharedApiPackages))
         {
-            "mediatr" => (
-                new[] { "FluentValidation", "MediatR" },
-                new[]
-                {
-                    "builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));",
-                    "builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);",
-                }),
-            "wolverine" => (
-                new[] { "FluentValidation", "Wolverine" },
-                new[]
-                {
-                    "builder.Host.UseWolverine();",
-                    "builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);",
-                }),
-            _ => throw new InvalidOperationException($"Unknown adapter '{adapterName}'."),
-        };
-
-        var usings = adapterUsings
-            .Concat(persistence.ProgramCsUsings)
-            .Concat(new[] { $"{solutionName}.Common" })
-            .Distinct()
-            .Select(u => $"using {u};");
-
-        var bodyLines = bootstrapLines.Concat(persistence.BuildProgramCsRegistration(solutionName));
-
-        var sb = new System.Text.StringBuilder();
-        foreach (var u in usings)
-        {
-            sb.AppendLine(u);
+            RunDotnet(root, "add", csprojPath, "package", package);
         }
 
-        sb.AppendLine();
-        sb.AppendLine("var builder = WebApplication.CreateBuilder(args);");
-        sb.AppendLine();
-        foreach (var line in bodyLines)
-        {
-            sb.AppendLine(line);
-        }
-
-        sb.AppendLine();
-        sb.AppendLine("var app = builder.Build();");
-        sb.AppendLine();
-        sb.AppendLine("// Generated Get/Update handlers throw KeyNotFoundException for a missing id; map that to a");
-        sb.AppendLine("// proper 404 instead of letting it surface as an unhandled 500.");
-        sb.AppendLine("app.Use(async (context, next) =>");
-        sb.AppendLine("{");
-        sb.AppendLine("    try");
-        sb.AppendLine("    {");
-        sb.AppendLine("        await next();");
-        sb.AppendLine("    }");
-        sb.AppendLine("    catch (KeyNotFoundException ex)");
-        sb.AppendLine("    {");
-        sb.AppendLine("        context.Response.StatusCode = StatusCodes.Status404NotFound;");
-        sb.AppendLine("        await context.Response.WriteAsJsonAsync(new { error = ex.Message });");
-        sb.AppendLine("    }");
-        sb.AppendLine("});");
-        sb.AppendLine();
-        sb.AppendLine("foreach (var endpointType in typeof(Program).Assembly.GetTypes()");
-        sb.AppendLine("    .Where(t => typeof(IEndpointDefinition).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface))");
-        sb.AppendLine("{");
-        sb.AppendLine("    var endpoint = (IEndpointDefinition)Activator.CreateInstance(endpointType)!;");
-        sb.AppendLine("    endpoint.Map(app);");
-        sb.AppendLine("}");
-        sb.AppendLine();
-        sb.Append("app.Run();");
-        return sb.ToString();
+        return (apiCsprojRelative, context);
     }
 
-    private static string BuildEndpointDefinitionInterface(string solutionName) =>
-        $$"""
-        namespace {{solutionName}}.Common;
-
-        public interface IEndpointDefinition
-        {
-            void Map(IEndpointRouteBuilder app);
-        }
-        """;
-
-    private static string BuildAppSettings(string solutionName, PersistenceProvider provider)
+    private static (string ApiCsprojRelative, GenerationContext Context) ScaffoldCleanArchitecture(string root, string solutionName, string adapterName, IFrameworkAdapter adapter, IPersistenceGenerator persistence)
     {
-        var connectionString = provider switch
-        {
-            PersistenceProvider.EfCorePostgres => $"Host=localhost;Database={solutionName.ToLowerInvariant()};Username=postgres;Password=postgres",
-            PersistenceProvider.EfCoreSqlServer => $"Server=localhost;Database={solutionName};Trusted_Connection=True;TrustServerCertificate=True",
-            PersistenceProvider.Marten => $"Host=localhost;Database={solutionName.ToLowerInvariant()};Username=postgres;Password=postgres",
-            _ => string.Empty,
-        };
+        var apiRelative = $"src/{solutionName}.Api";
+        var applicationRelative = $"src/{solutionName}.Application";
+        var domainRelative = $"src/{solutionName}.Domain";
+        var infrastructureRelative = $"src/{solutionName}.Infrastructure";
 
-        return $$"""
+        var context = GenerationContext.ForCleanArchitecture(solutionName, apiRelative, applicationRelative, domainRelative, infrastructureRelative);
+
+        var domainDir = Path.Combine(root, domainRelative);
+        Directory.CreateDirectory(domainDir);
+        var domainCsprojPath = Path.Combine(domainDir, $"{solutionName}.Domain.csproj");
+        File.WriteAllText(domainCsprojPath, ProjectFiles.ClassLibrary());
+
+        var applicationDir = Path.Combine(root, applicationRelative);
+        Directory.CreateDirectory(applicationDir);
+        var applicationCsprojPath = Path.Combine(applicationDir, $"{solutionName}.Application.csproj");
+        File.WriteAllText(applicationCsprojPath, ProjectFiles.ClassLibrary(new[] { $"../{solutionName}.Domain/{solutionName}.Domain.csproj" }));
+        File.WriteAllText(Path.Combine(applicationDir, $"{ProgramCsBuilder.ApplicationAssemblyMarkerName}.cs"), ProgramCsBuilder.BuildApplicationAssemblyMarker(context));
+
+        var infrastructureDir = Path.Combine(root, infrastructureRelative);
+        Directory.CreateDirectory(infrastructureDir);
+        var infrastructureCsprojPath = Path.Combine(infrastructureDir, $"{solutionName}.Infrastructure.csproj");
+        File.WriteAllText(infrastructureCsprojPath, ProjectFiles.ClassLibrary(new[]
         {
-          "ConnectionStrings": {
-            "Default": "{{connectionString}}"
-          },
-          "Logging": {
-            "LogLevel": {
-              "Default": "Information",
-              "Microsoft.AspNetCore": "Warning"
-            }
-          }
+            $"../{solutionName}.Application/{solutionName}.Application.csproj",
+            $"../{solutionName}.Domain/{solutionName}.Domain.csproj",
+        }));
+
+        var apiDir = Path.Combine(root, apiRelative);
+        Directory.CreateDirectory(apiDir);
+        var apiCsprojPath = Path.Combine(apiDir, $"{solutionName}.Api.csproj");
+        File.WriteAllText(apiCsprojPath, ProjectFiles.WebProject(new[]
+        {
+            $"../{solutionName}.Application/{solutionName}.Application.csproj",
+            $"../{solutionName}.Infrastructure/{solutionName}.Infrastructure.csproj",
+        }));
+        WriteApiProjectFiles(apiDir, context, adapterName, persistence, PersistenceRegistry.ParseProvider(persistence.Name));
+
+        foreach (var (relative, csprojPath) in new[]
+        {
+            (domainRelative, domainCsprojPath),
+            (applicationRelative, applicationCsprojPath),
+            (infrastructureRelative, infrastructureCsprojPath),
+            (apiRelative, apiCsprojPath),
+        })
+        {
+            RunDotnet(root, "sln", "add", Path.Combine(relative, Path.GetFileName(csprojPath)));
         }
-        """;
+
+        foreach (var package in adapter.RequiredPackages.Concat(persistence.ApplicationRequiredPackages))
+        {
+            RunDotnet(root, "add", applicationCsprojPath, "package", package);
+        }
+
+        foreach (var package in persistence.RequiredPackages)
+        {
+            RunDotnet(root, "add", infrastructureCsprojPath, "package", package);
+        }
+
+        foreach (var package in SharedApiPackages)
+        {
+            RunDotnet(root, "add", apiCsprojPath, "package", package);
+        }
+
+        return (Path.Combine(apiRelative, $"{solutionName}.Api.csproj"), context);
     }
 
-    private const string GitIgnoreContent =
-        """
-        bin/
-        obj/
-        """;
+    /// <summary>Packages every Api project needs regardless of adapter/persistence/layout: Swagger + structured logging.</summary>
+    private static readonly string[] SharedApiPackages = { "Swashbuckle.AspNetCore", "Serilog.AspNetCore", "Serilog.Sinks.Console" };
 
-    private static void RunDotnet(string workingDirectory, params string[] arguments)
+    private static void WriteApiProjectFiles(string apiProjectDir, GenerationContext context, string adapterName, IPersistenceGenerator persistence, PersistenceProvider persistenceProvider)
+    {
+        File.WriteAllText(Path.Combine(apiProjectDir, "Program.cs"), ProgramCsBuilder.BuildProgramCs(context, adapterName, persistence));
+
+        var commonDir = Path.Combine(apiProjectDir, "Common");
+        Directory.CreateDirectory(commonDir);
+        File.WriteAllText(Path.Combine(commonDir, "IEndpointDefinition.cs"), ProgramCsBuilder.BuildEndpointDefinitionInterface(context));
+        File.WriteAllText(Path.Combine(commonDir, "ExceptionHandlingMiddleware.cs"), ProgramCsBuilder.BuildExceptionHandlingMiddleware(context));
+
+        var propertiesDir = Path.Combine(apiProjectDir, "Properties");
+        Directory.CreateDirectory(propertiesDir);
+        File.WriteAllText(Path.Combine(propertiesDir, "launchSettings.json"), InfrastructureFiles.LaunchSettings());
+
+        File.WriteAllText(Path.Combine(apiProjectDir, "appsettings.json"), InfrastructureFiles.AppSettings(persistenceProvider));
+        File.WriteAllText(Path.Combine(apiProjectDir, "appsettings.Development.json"), InfrastructureFiles.AppSettingsDevelopment(context.RootNamespace, persistenceProvider));
+    }
+
+    internal static void RunDotnet(string workingDirectory, params string[] arguments)
     {
         var psi = new ProcessStartInfo("dotnet")
         {

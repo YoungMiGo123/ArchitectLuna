@@ -1,22 +1,36 @@
 # Generated code shape
 
-ArchitectLuna generates one style: a **vertical slice per command/query**, inside a single
-ASP.NET Core minimal-API project. There is no Clean Architecture layer split (Domain/Application/
-Infrastructure/Api projects) yet — see `docs/ROADMAP.md` for where that and other patterns fit.
+ArchitectLuna generates one command/query shape — a vertical slice per command/query, always
+rendered through the same `Templates/Shared` endpoint/validator templates — but two interchangeable
+**layouts** for where those slices land on disk: `--architecture vertical-slice` (default, one Api
+project) and `--architecture clean-architecture` (Api/Application/Domain/Infrastructure as four
+real projects). Everything else in this document (entity-driven CRUD, protected regions, adapter/
+persistence parity) is identical regardless of layout.
 
-## Solution shape (`new api`)
+## Solution shape (`new api`) — vertical slice
 
 ```
 {Solution}/
   {Solution}.slnx
+  Directory.Build.props   # shared TargetFramework/ImplicitUsings/Nullable for every project
+  Dockerfile
+  docker-compose.yml       # + a `db` service when --persistence is configured
   .architect/
     model.yaml          # the Intent Model
     manifest.json        # every path ever generated, for future cleanup tooling
   src/{Solution}.Api/
     {Solution}.Api.csproj
-    Program.cs            # adapter bootstrap + reflection-based IEndpointDefinition mapping
+    Program.cs            # adapter bootstrap, Swagger/health-checks/logging, reflection-based IEndpointDefinition mapping
+    Properties/launchSettings.json
+    appsettings.json               # no secrets — Logging/Serilog config only
+    appsettings.Development.json   # local dev connection string, when persistence is configured
     Common/
       IEndpointDefinition.cs
+      ExceptionHandlingMiddleware.cs   # KeyNotFoundException -> 404, else -> 500, as problem+json
+    Persistence/                       # only when --persistence isn't `none`
+      Entities/{Entity}.cs             # (or Documents/{Entity}.cs for Marten)
+      Configurations/{Entity}Configuration.cs   # EF Core only
+      {Solution}DbContext.cs                    # EF Core only
     Features/
       {Feature}/
         {Command}/
@@ -28,11 +42,55 @@ Infrastructure/Api projects) yet — see `docs/ROADMAP.md` for where that and ot
           {Query}Query.cs
           {Query}Handler.cs
           {Query}Endpoint.cs
+  tests/{Solution}.Api.Tests/
+    {Solution}.Api.Tests.csproj
+    HealthCheckTests.cs      # WebApplicationFactory<Program> smoke test against /health
+```
+
+## Solution shape (`new api --architecture clean-architecture`)
+
+Same per-command/query file shape, split across four real projects with the dependency rule
+pointing inward (`Api`/`Infrastructure` → `Application` → `Domain`):
+
+```
+{Solution}/
+  {Solution}.slnx
+  Directory.Build.props
+  Dockerfile
+  docker-compose.yml
+  .architect/
+  src/
+    {Solution}.Domain/                      # no project references, no packages
+      Entities/{Entity}.cs
+    {Solution}.Application/                 # references Domain; MediatR/Wolverine + FluentValidation
+      ApplicationAssemblyMarker.cs          # anchor type for Program.cs's assembly-scanning registration
+      Persistence/I{Solution}DbContext.cs   # EF Core only, DbSet<T> per entity — Application owns this
+                                             # abstraction so it never needs to reference Infrastructure
+      Features/{Feature}/{Command Or Query}/
+        ...Command.cs / ...Query.cs, ...Handler.cs, ...Validator.cs
+    {Solution}.Infrastructure/              # references Application + Domain; EF Core/Marten packages
+      Configurations/{Entity}Configuration.cs
+      {Solution}DbContext.cs                # implements I{Solution}DbContext
+    {Solution}.Api/                         # references Application + Infrastructure (composition root)
+      {Solution}.Api.csproj
+      Program.cs
+      Properties/launchSettings.json
+      appsettings*.json
+      Common/
+        IEndpointDefinition.cs
+        ExceptionHandlingMiddleware.cs
+      Features/{Feature}/{Command Or Query}/
+        ...Endpoint.cs
+  tests/
+    {Solution}.Application.Tests/
+    {Solution}.Api.Tests/
 ```
 
 `Program.cs` is written once by `new api` and never needs to be regenerated: it discovers every
 `IEndpointDefinition` in the assembly by reflection and maps it, so adding a new feature/entity
-never touches it.
+never touches it. Under Clean Architecture it also scans the Application assembly (via
+`ApplicationAssemblyMarker`) for MediatR/Wolverine handlers and FluentValidation validators, since
+those live in a different project than `Program.cs` itself.
 
 ## Entity-driven CRUD (`add entity`)
 

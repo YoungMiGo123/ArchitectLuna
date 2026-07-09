@@ -41,6 +41,11 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         ? new[] { "Microsoft.EntityFrameworkCore", "Npgsql.EntityFrameworkCore.PostgreSQL" }
         : new[] { "Microsoft.EntityFrameworkCore", "Microsoft.EntityFrameworkCore.SqlServer" };
 
+    // Handler bodies (dbContext.Add/Find/Remove/SaveChangesAsync) and, under Clean Architecture,
+    // the I{Solution}DbContext interface's DbSet<T> properties both live in Application — neither
+    // needs the database-specific provider package, only EF Core's own abstractions.
+    public IReadOnlyList<string> ApplicationRequiredPackages { get; } = new[] { "Microsoft.EntityFrameworkCore" };
+
     public IReadOnlyList<string> ProgramCsUsings { get; } = new[] { "Microsoft.EntityFrameworkCore" };
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
@@ -57,11 +62,10 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
 
     public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities)
     {
-        if (entities.Count == 0)
-        {
-            return Array.Empty<GeneratedFile>();
-        }
-
+        // Always emits the DbContext (even with zero DbSets) rather than only once an entity
+        // exists: Program.cs references this type unconditionally as soon as EF Core persistence
+        // is configured, so the freshly scaffolded solution (before the first `generate`) needs it
+        // to already exist and compile.
         var files = new List<GeneratedFile>
         {
             new($"{context.Infrastructure.ProjectRoot}/{DbContextName(context)}.cs", RenderDbContext(context, entities)),
@@ -105,19 +109,27 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         return new HandlerBinding(body, DependencyTypeName(context), "dbContext", HandlerUsings(context));
     }
 
-    public IReadOnlyList<string> BuildProgramCsRegistration(string solutionName)
+    public IReadOnlyList<string> BuildProgramCsRegistration(GenerationContext context)
     {
-        // Fully qualified rather than relying on a "using {solutionName}.Persistence;" being
-        // present in Program.cs — keeps this independent of whichever usings the caller composes.
-        var qualifiedDbContextName = $"{solutionName}.Persistence.{solutionName}DbContext";
+        // Fully qualified rather than relying on a "using ...;" being present in Program.cs —
+        // keeps this independent of whichever usings the caller composes.
+        var qualifiedDbContextName = $"{context.Infrastructure.RootNamespace}.{DbContextName(context)}";
         var useCall = _kind == EfCoreProviderKind.Postgres
             ? "options.UseNpgsql(builder.Configuration.GetConnectionString(\"Default\"))"
             : "options.UseSqlServer(builder.Configuration.GetConnectionString(\"Default\"))";
 
-        return new[]
+        var lines = new List<string>
         {
             $"builder.Services.AddDbContext<{qualifiedDbContextName}>(options => {useCall});",
         };
+
+        if (context.HasSeparateInfrastructure)
+        {
+            var qualifiedInterfaceName = $"{context.Application.RootNamespace}.Persistence.{DbContextInterfaceName(context)}";
+            lines.Add($"builder.Services.AddScoped<{qualifiedInterfaceName}>(sp => sp.GetRequiredService<{qualifiedDbContextName}>());");
+        }
+
+        return lines;
     }
 
     private static string DbContextName(GenerationContext context) => $"{context.RootNamespace}DbContext";
@@ -174,7 +186,14 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
     {
         var sb = new StringBuilder();
         sb.AppendLine("using Microsoft.EntityFrameworkCore;");
-        sb.AppendLine($"using {context.Domain.RootNamespace}.Entities;");
+        if (entities.Count > 0)
+        {
+            // Only when there's at least one entity: a `using` for a namespace nothing has
+            // declared yet (e.g. a fresh `new api` scaffold, before any entity exists) is a
+            // compile error (CS0234), not a harmless no-op.
+            sb.AppendLine($"using {context.Domain.RootNamespace}.Entities;");
+        }
+
         sb.AppendLine();
         sb.AppendLine($"namespace {context.Application.RootNamespace}.Persistence;");
         sb.AppendLine();
@@ -198,7 +217,11 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         var dbContextName = DbContextName(context);
         var sb = new StringBuilder();
         sb.AppendLine("using Microsoft.EntityFrameworkCore;");
-        sb.AppendLine($"using {context.Domain.RootNamespace}.Entities;");
+        if (entities.Count > 0)
+        {
+            sb.AppendLine($"using {context.Domain.RootNamespace}.Entities;");
+        }
+
         if (context.HasSeparateInfrastructure)
         {
             sb.AppendLine($"using {context.Application.RootNamespace}.Persistence;");

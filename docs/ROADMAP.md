@@ -53,6 +53,28 @@
   placeholder-only handlers. Covered by `ArchitectLuna.EndToEnd.Tests` and the CI smoke matrix
   for both adapters; that same pass also added the previously-missing `marten` cases to
   `GeneratedSolutionBuildTests` (it was in the CI smoke matrix but absent from the xUnit suite).
+- **Clean Architecture layering as an alternative to vertical slice.** `--architecture
+  clean-architecture` (default remains `vertical-slice`) splits generated code across four real
+  projects — Domain/Application/Infrastructure/Api — sharing the same Intent Model, adapters, and
+  persistence providers as vertical slice. `GenerationContext` carries four independent
+  `ProjectTarget`s so adapters/persistence generators never branch on layout (see
+  `docs/ARCHITECTURE.md`'s "Layout" section); EF Core's persistence generator emits an
+  `I{Solution}DbContext` interface in Application (implemented by the concrete `DbContext` in
+  Infrastructure) so the dependency rule — Application never references Infrastructure — actually
+  holds, not just by convention. Verified end to end for every adapter × persistence combination in
+  both layouts (`CleanArchitectureBuildTests`), including that a fresh scaffold compiles *before*
+  the first `generate` run.
+- **Production-readiness baseline, every scaffold.** Swagger (`Swashbuckle.AspNetCore`), health
+  checks at `/health`, a global `ExceptionHandlingMiddleware` (maps `KeyNotFoundException` → 404,
+  anything else → 500 as a `problem+json` body), Serilog console logging, and an xUnit test project
+  (`{Solution}.Api.Tests`, plus `{Solution}.Application.Tests` for Clean Architecture) are part of
+  every `new api` scaffold now, not a follow-up step.
+- **Docker, every scaffold.** A multi-stage `Dockerfile` (restores/publishes the whole solution,
+  runs just the Api project) and a `docker-compose.yml` — with a `db` service (Postgres or SQL
+  Server, matching `--persistence`) wired via `ConnectionStrings__Default` when persistence is
+  configured — plus `Properties/launchSettings.json` and an `appsettings.json`/
+  `appsettings.Development.json` split (base file has no secrets; the dev connection string lives
+  only in the gitignorable Development file).
 
 ## Near-term — get to a demoable prototype
 
@@ -70,12 +92,6 @@
 
 ## Medium-term
 
-- **Clean Architecture layering as an alternative to vertical slice.** Today's `new api` produces
-  a single project with a `Features/` vertical slice per command/query. A `--layout
-  clean-architecture` (or similar) option would instead split generated code across
-  Domain/Application/Infrastructure/Api projects, sharing the same Intent Model and adapters —
-  vertical slice and Clean Architecture become two output shapes over one model, not two
-  disconnected tools.
 - **`SchemaVersion` migration.** `ArchitectModel.SchemaVersion` exists but nothing reads it yet;
   once the YAML shape needs to change, this is what upgrades an older `model.yaml` in place.
 - **Publish the packaged tool to a real feed.** GitHub Packages (natural fit, repo's already
