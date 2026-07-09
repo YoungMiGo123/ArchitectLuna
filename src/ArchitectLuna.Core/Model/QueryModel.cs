@@ -21,10 +21,10 @@ public sealed class QueryModel
     public bool IsCollection { get; init; }
 
     /// <summary>
-    /// True for a paged list query (synthesized GetAll): the result is wrapped as
-    /// PagedResult&lt;TResult&gt; instead of a bare list, the message carries Page/PageSize, and
-    /// the endpoint binds <c>?page=&amp;pageSize=</c> from the query string. Implies
-    /// <see cref="IsCollection"/>.
+    /// True for a CRUD-synthesized GetAll query: the result is wrapped as
+    /// PagedResult&lt;TResult&gt; instead of a raw list, and the generated handler pages
+    /// (Skip/Take or provider equivalent) instead of loading every row. Page/PageSize never join
+    /// <see cref="Params"/> — they're query-string-only and must not affect route inference.
     /// </summary>
     public bool IsPaged { get; init; }
 

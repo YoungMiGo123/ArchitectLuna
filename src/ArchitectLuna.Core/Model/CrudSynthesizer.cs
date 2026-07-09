@@ -54,14 +54,7 @@ public static class CrudSynthesizer
         var getAllQuery = new QueryModel
         {
             Name = $"GetAll{NamingConventions.Pluralize(entity.Name)}",
-            // Page/PageSize are bound from the query string (?page=&pageSize=) with defaults, not
-            // from the route — the endpoint keeps the plain collection route. They carry the
-            // paging arguments into the handler, which returns a PagedResult<T>.
-            Params = new List<ParamModel>
-            {
-                new() { Name = "Page", Type = "int" },
-                new() { Name = "PageSize", Type = "int" },
-            },
+            Params = new List<ParamModel>(),
             ResultFields = resultFields,
             IsCollection = true,
             IsPaged = true,

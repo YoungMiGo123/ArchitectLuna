@@ -12,4 +12,5 @@ delete completed plans — they are the design history of the project.
 | # | Plan | Status |
 |---|---|---|
 | 001 | [Production foundation + testing layer](001-production-foundation-and-testing-layer.md) | Done |
-| 002 | [Runnable persistence + pagination](002-runnable-persistence-and-pagination.md) | Done |
+| 002 | [Pagination for generated GetAll queries](002-crud-getall-pagination.md) | Done |
+| 003 | [Runnable persistence + schema init](003-runnable-persistence-and-schema-init.md) | Done |

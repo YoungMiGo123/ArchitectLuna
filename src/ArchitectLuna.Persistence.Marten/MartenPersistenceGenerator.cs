@@ -276,6 +276,7 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         var args = string.Join(", ", new[] { "entity.Id" }.Concat(entity.Fields.Select(f => $"entity.{f.Name}")));
         var sb = new StringBuilder();
         sb.AppendLine("var page = message.Page <= 0 ? 1 : message.Page;");
+        // Capped, not just defaulted: an unbounded ?pageSize= is a resource-exhaustion vector.
         sb.AppendLine("var pageSize = message.PageSize <= 0 ? 20 : Math.Min(message.PageSize, 100);");
         sb.AppendLine($"var totalCount = await session.Query<{entity.Name}>().CountAsync(cancellationToken);");
         sb.AppendLine($"var entities = await session.Query<{entity.Name}>().OrderBy(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);");

@@ -1,4 +1,4 @@
-# Plan 002: Runnable persistence + pagination + production hardening
+# Plan 003: Runnable persistence + schema init + production hardening
 
 - **Status:** Done
 - **Complexity:** L
@@ -6,16 +6,24 @@
 - **Date started:** 2026-07-09
 - **Checklist used:** none single-fits; `new-persistence-provider.md` discipline applied to the
   per-provider registration/schema work.
+- **Note:** Built on a separate branch in parallel with [plan 002](002-crud-getall-pagination.md),
+  which independently implemented the `GetAll` pagination mechanism (`QueryModel.IsPaged`,
+  `CrudSynthesizer`, both adapters). The two merged into `master` together — plan 002's pagination
+  *design* (Params stays empty; Page/PageSize synthesized in the adapters; anonymous-object
+  response envelope) was kept as-is; this plan's *additional* pageSize cap and all of the
+  schema-creation/health-check/Wolverine-fix work below were layered on top. See plan 002's
+  Addendum for the reconciliation.
 
 ## Summary
 
-Today a generated `efcore-*` solution compiles and boots but **cannot serve a request** — the
-DbContext has no schema behind it (no migration, no `EnsureCreated`, no Design tooling), and
-`marten` never registers its document types or applies schema, so its tables are never created.
-`GetAll` returns the entire table with no paging even though `PagedResult<T>` already ships. This
-plan makes every persistence provider *actually runnable and production-shaped* out of the box —
-schema created at startup, database readiness health checks, connection resilience — and wires
-real pagination through `GetAll` across both adapters and all four persistence providers.
+Before this plan, a generated `efcore-*` solution compiled and booted but **could not serve a
+request** — the DbContext had no schema behind it (no migration, no `EnsureCreated`, no Design
+tooling), and `marten` never registered its document types or applied schema, so its tables were
+never created. This plan makes every persistence provider *actually runnable and
+production-shaped* out of the box: schema created at startup, database readiness health checks,
+and connection resilience, across both adapters and all four persistence providers. (`GetAll`
+pagination — the other half of "production-shaped" — is plan 002's scope, developed in parallel
+and merged alongside this one.)
 
 ## Affected components
 

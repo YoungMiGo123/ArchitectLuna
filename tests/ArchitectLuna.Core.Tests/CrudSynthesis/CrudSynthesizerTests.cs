@@ -70,19 +70,8 @@ public sealed class CrudSynthesizerTests
 
         var getAll = queries.Single(q => q.Name == "GetAllInvoices");
         Assert.True(getAll.IsCollection);
-        Assert.Equal(3, getAll.ResultFields.Count);
-    }
-
-    [Fact]
-    public void SynthesizeCrud_GetAll_IsPagedWithPageAndPageSizeParams()
-    {
-        var (_, queries) = CrudSynthesizer.SynthesizeCrud(MakeInvoiceEntity());
-        var getAll = queries.Single(q => q.Name == "GetAllInvoices");
-
         Assert.True(getAll.IsPaged);
-        Assert.True(getAll.IsCollection);
-        Assert.Equal(new[] { "Page", "PageSize" }, getAll.Params.Select(p => p.Name));
-        Assert.All(getAll.Params, p => Assert.Equal("int", p.Type));
+        Assert.Equal(3, getAll.ResultFields.Count);
     }
 
     [Fact]

@@ -25,6 +25,11 @@ public static class ModelValidator
             errors.Add($"adapter must be one of [{string.Join(", ", KnownAdapters)}], was '{model.Adapter}'.");
         }
 
+        if (model.Layout is null)
+        {
+            errors.Add($"layout is required and must be one of [{string.Join(", ", Enum.GetNames<SolutionLayout>())}].");
+        }
+
         var featureNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var feature in model.Features)
         {

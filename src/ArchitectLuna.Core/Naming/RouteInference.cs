@@ -30,9 +30,7 @@ public static class RouteInference
 
         var featureSegment = NamingConventions.ToKebabCase(feature.Name);
 
-        // A collection query (GetAll) always maps to the plain collection route even when it
-        // carries params — a paged GetAll binds page/pageSize from the query string, not the path.
-        if (query.IsCollection || query.Params.Count == 0)
+        if (query.Params.Count == 0)
         {
             return $"/api/{featureSegment}";
         }

@@ -101,22 +101,35 @@
   test` run of a generated solution's own test suite — which immediately caught that core
   WolverineFx stopped shipping its runtime compiler: generated Wolverine apps compiled but threw
   at startup; fixed via `WolverineFx.RuntimeCompilation` + `opts.UseRuntimeCompilation()`).
-- **Runnable persistence + pagination + production hardening** (plan:
-  `docs/plans/002-runnable-persistence-and-pagination.md`). Generated `efcore-postgres`/
-  `efcore-sqlserver`/`marten` solutions now create their own schema at startup and serve real CRUD
-  against a live database with no manual migration step — verified end to end against a live
-  Postgres for MediatR+EF Core, Wolverine+Marten, and Wolverine+EF Core, not just `dotnet build`.
-  Each provider emits an `AddPersistence` extension (regenerated per `generate` with full entity
-  knowledge, replacing the old scaffold-time `BuildServiceRegistration`): EF Core adds a
-  `DatabaseInitializer` (migrate-else-`EnsureCreated`) + `DatabaseHealthCheck` + connection
-  resilience; Marten registers every document type + `ApplyAllDatabaseChangesOnStartup()` + a
-  health check. `/health` (liveness) and `/health/ready` (DB readiness) are split. Synthesized
-  `GetAll` is paged (`?page=&pageSize=` → `PagedResult<T>` with `Skip`/`Take`/`Count`) across both
-  adapters and all providers. Wolverine handlers set `ServiceLocationPolicy.AlwaysAllowed` so they
-  resolve the injected `DbContext`/`IDocumentSession` (Wolverine 6 otherwise throws at the first
-  message). EF Core's `Design` package is deliberately not scaffolded (its `PrivateAssets=all`
-  split the `Relational` assembly version between compile and runtime and threw at startup);
-  migrations are a documented opt-in.
+- **Pagination for generated GetAll queries** (plan: `docs/plans/002-crud-getall-pagination.md`).
+  Every CRUD-synthesized `GetAll{Entity}` query now accepts `page`/`pageSize` query-string
+  parameters and returns `Result<PagedResult<T>>` — `PagedResult<T>` existed since the production
+  foundation but was unused dead code until now. All three persistence providers page with
+  `Skip`/`Take` (or the Marten/EF Core equivalent) instead of loading the entire table, ordered by
+  `Id` for deterministic paging; missing `page` defaults to 1, missing/oversized `pageSize`
+  defaults to and caps at 20/100 respectively (a resource-exhaustion guard added while merging
+  with plan 003 below). Works identically across `mediatr`/`wolverine` and both
+  `vertical-slice`/`clean-architecture` layouts — Page/PageSize never join `QueryModel.Params`, so
+  the route stays the plain collection route (`GET /api/{feature}`) with no `RouteInference`
+  changes. Out of scope: hand-authored `add query --collection` queries (not CRUD-synthesized) are
+  still unbounded; a typed Contracts `PagedResponse<T>` DTO (currently an anonymous object) is a
+  follow-up.
+- **Runnable persistence + schema init + production hardening** (plan:
+  `docs/plans/003-runnable-persistence-and-schema-init.md`, developed in parallel with plan 002
+  above and merged alongside it). Generated `efcore-postgres`/`efcore-sqlserver`/`marten`
+  solutions now create their own schema at startup and serve real CRUD against a live database
+  with no manual migration step — verified end to end against a live Postgres for MediatR+EF Core,
+  Wolverine+Marten, and Wolverine+EF Core, not just `dotnet build`. Each provider emits an
+  `AddPersistence` extension (regenerated per `generate` with full entity knowledge, replacing the
+  old scaffold-time `BuildServiceRegistration`): EF Core adds a `DatabaseInitializer`
+  (migrate-else-`EnsureCreated`) + `DatabaseHealthCheck` + connection resilience; Marten registers
+  every document type + `ApplyAllDatabaseChangesOnStartup()` + a health check. `/health` (liveness)
+  and `/health/ready` (DB readiness) are split. Wolverine handlers set
+  `ServiceLocationPolicy.AlwaysAllowed` so they resolve the injected
+  `DbContext`/`IDocumentSession` (Wolverine 6 otherwise throws at the first message). EF Core's
+  `Design` package is deliberately not scaffolded (its `PrivateAssets=all` split the `Relational`
+  assembly version between compile and runtime and threw at startup); migrations are a documented
+  opt-in.
 
 ## Near-term — get to a demoable prototype
 
@@ -125,7 +138,7 @@
   instead of at the next manual build.
 - **`adapter switch`.** Regenerate an existing model onto a different adapter in place — the
   proof that `IFrameworkAdapter` is a real seam, not just a naming convention.
-- **EF Core migrations, first-class.** *(Runnability is done — see plan 002: a generated
+- **EF Core migrations, first-class.** *(Runnability is done — see plan 003: a generated
   `efcore-*` app now creates its schema at startup via the `DatabaseInitializer` and is runnable
   immediately; migrations are a documented opt-in.)* Remaining: scaffold an initial migration and
   wire `dotnet ef migrations add`/`database update` into the tool so teams get the
