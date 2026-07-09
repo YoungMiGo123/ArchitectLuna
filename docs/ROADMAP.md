@@ -113,7 +113,8 @@
   the route stays the plain collection route (`GET /api/{feature}`) with no `RouteInference`
   changes. Out of scope: hand-authored `add query --collection` queries (not CRUD-synthesized) are
   still unbounded; a typed Contracts `PagedResponse<T>` DTO (currently an anonymous object) is a
-  follow-up.
+  follow-up. *(Closed — see the standard response envelope entry below: `GetAll` now returns a
+  typed `PagedResponse<T>`.)*
 - **Runnable persistence + schema init + production hardening** (plan:
   `docs/plans/003-runnable-persistence-and-schema-init.md`, developed in parallel with plan 002
   above and merged alongside it). Generated `efcore-postgres`/`efcore-sqlserver`/`marten`
@@ -130,6 +131,21 @@
   `Design` package is deliberately not scaffolded (its `PrivateAssets=all` split the `Relational`
   assembly version between compile and runtime and threw at startup); migrations are a documented
   opt-in.
+- **Standard `ApiResponse<T>` response envelope + Controller output** (plan:
+  `docs/plans/004-standard-response-envelope-and-controllers.md`, requirements:
+  `docs/requirements/004-standards-return-types.md`). Every generated API response is now wrapped
+  in `{ success, payload, error }` regardless of adapter (MediatR/Wolverine), persistence provider
+  (EF Core/Marten/in-memory/none), or `--api-style`. Centralized
+  `src/{Solution}.Api/Results/ResultExtensions.cs` (`ToOkResponse`/`ToCreatedResponse`/
+  `ToNoContentResponse`/`ToErrorResponse`/`ToValidationErrorResponse`) replaces per-endpoint
+  `Results.Ok`/`Results.Created`/`Results.Problem`/`Results.ValidationProblem` calls; OpenAPI
+  metadata documents `ApiResponse<T>`, not the raw response DTO. `GetAll` returns a typed
+  `PagedResponse<T>` (`src/{Solution}.Contracts/Common/PagedResponse.cs`) instead of an anonymous
+  paging object. New `--api-style controllers` (default remains `minimal-api`) generates
+  `[ApiController]` actions instead of `IEndpointDefinition` Minimal API classes, via a parallel
+  `ResultActionExtensions` (`IActionResult`-returning) sharing the same envelope/status-code
+  mapping — the two styles are contractually identical over HTTP. `ArchitectLuna.Ui` has no
+  API-style picker yet (gap).
 
 ## Near-term — get to a demoable prototype
 
