@@ -196,6 +196,7 @@ public static class SolutionScaffolder
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = true,
             UseShellExecute = false,
         };
 
@@ -205,6 +206,15 @@ public static class SolutionScaffolder
         }
 
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start 'dotnet' process.");
+
+        // Close stdin immediately: some `dotnet add package`/restore paths can decide to prompt
+        // (e.g. package source trust, license acceptance) if they see an attached, readable stdin
+        // — which they will if this process doesn't redirect it, since the child then inherits
+        // whatever stdin this process has. Closing a redirected stdin gives the child immediate EOF
+        // instead, so any such prompt is answered "nothing more is coming" rather than blocking
+        // forever waiting for a human who isn't there. Observed in practice: `dotnet add package
+        // MediatR` specifically hung indefinitely (5+ minutes, killed by test timeout) without this.
+        process.StandardInput.Close();
 
         // Drain both streams asynchronously via events rather than a blocking stdout.ReadToEnd()
         // followed by stderr.ReadToEnd(): a `dotnet add package` call that writes enough to stderr

@@ -17,6 +17,7 @@ public static class CliRunner
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = true,
             UseShellExecute = false,
         };
 
@@ -31,6 +32,11 @@ public static class CliRunner
         {
             return new CliRunResult(false, -1, string.Empty, "Failed to start 'dotnet' process.");
         }
+
+        // Close stdin immediately so a child that unexpectedly tries to read from it (an
+        // interactive NuGet prompt, say) gets EOF instead of blocking forever — see
+        // SolutionScaffolder.RunDotnet's doc comment for the concrete case this fixed.
+        process.StandardInput.Close();
 
         // Async drain via events, not a blocking stdout.ReadToEnd() then stderr.ReadToEnd(): that
         // sequential pattern deadlocks if the child fills the stderr pipe buffer while stdout is
