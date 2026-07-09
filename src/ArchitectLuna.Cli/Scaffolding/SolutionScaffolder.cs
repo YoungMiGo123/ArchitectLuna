@@ -205,8 +205,21 @@ public static class SolutionScaffolder
         }
 
         using var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start 'dotnet' process.");
-        var stdout = process.StandardOutput.ReadToEnd();
-        var stderr = process.StandardError.ReadToEnd();
+
+        // Drain both streams asynchronously via events rather than a blocking stdout.ReadToEnd()
+        // followed by stderr.ReadToEnd(): a `dotnet add package` call that writes enough to stderr
+        // (NuGet compatibility warnings are common) to fill the OS pipe buffer while stdout is
+        // still open deadlocks the classic sequential-ReadToEnd pattern — the child blocks writing
+        // to a full stderr pipe nobody is draining, while this process blocks waiting for stdout to
+        // reach EOF, which never happens because the child never gets to run again. `new api` under
+        // Clean Architecture makes ~20 sequential dotnet subprocess calls per scaffold, which was
+        // enough to hit this in practice (multi-minute to indefinite hangs), not just in theory.
+        var stdout = new System.Text.StringBuilder();
+        var stderr = new System.Text.StringBuilder();
+        process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.AppendLine(e.Data); };
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
         process.WaitForExit();
 
         if (process.ExitCode != 0)

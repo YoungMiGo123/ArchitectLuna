@@ -55,7 +55,7 @@ public sealed class CleanArchitectureBuildTests
             var generate = ProcessRunner.RunCli(cliDllPath, solutionRoot, "generate");
             Assert.True(generate.ExitCode == 0, $"'generate' failed:\n{generate}");
 
-            AssertProperLayering(solutionRoot);
+            AssertProperLayering(solutionRoot, persistence);
 
             var build = ProcessRunner.RunDotnetBuild(solutionRoot, TimeSpan.FromMinutes(5));
             Assert.True(build.ExitCode == 0, $"'dotnet build' after generate (adapter={adapter}, persistence={persistence}) failed:\n{build}");
@@ -67,13 +67,23 @@ public sealed class CleanArchitectureBuildTests
     }
 
     /// <summary>Entities live in Domain, messages/handlers/validators in Application, endpoints in Api — never mixed up across projects.</summary>
-    private static void AssertProperLayering(string solutionRoot)
+    private static void AssertProperLayering(string solutionRoot, string persistence)
     {
-        var domainEntityPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Domain", "Entities", $"{EntityName}.cs");
+        // NullPersistenceGenerator (--persistence none) never emits an entity file at all — only
+        // the message/handler/validator/endpoint shape exists regardless of persistence provider.
+        if (persistence != "none")
+        {
+            // Marten writes plain document classes to a Documents/ subfolder rather than
+            // Entities/ — see MartenPersistenceGenerator vs EfCorePersistenceGenerator/
+            // InMemoryPersistenceGenerator.
+            var domainEntitySubfolder = persistence == "marten" ? "Documents" : "Entities";
+            var domainEntityPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Domain", domainEntitySubfolder, $"{EntityName}.cs");
+            Assert.True(File.Exists(domainEntityPath), $"Expected entity in Domain project at {domainEntityPath}");
+        }
+
         var applicationHandlerPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Application", "Features", FeatureName, $"Create{EntityName}", $"Create{EntityName}Handler.cs");
         var apiEndpointPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Api", "Features", FeatureName, $"Create{EntityName}", $"Create{EntityName}Endpoint.cs");
 
-        Assert.True(File.Exists(domainEntityPath), $"Expected entity in Domain project at {domainEntityPath}");
         Assert.True(File.Exists(applicationHandlerPath), $"Expected handler in Application project at {applicationHandlerPath}");
         Assert.True(File.Exists(apiEndpointPath), $"Expected endpoint in Api project at {apiEndpointPath}");
     }
