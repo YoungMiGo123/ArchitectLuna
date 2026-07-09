@@ -47,4 +47,22 @@ public sealed class CommandEndpointRenderModel
 
     /// <summary>Full await-able dispatch expression, e.g. "sender.Send(command, cancellationToken)".</summary>
     public required string DispatchCall { get; init; }
+
+    /// <summary>Where the Result pattern types live — the dispatch expression can name Result&lt;T&gt; explicitly (Wolverine's InvokeAsync).</summary>
+    public required string ResultsNamespace { get; init; }
+
+    /// <summary>The Request DTO bound from the JSON body; null when <see cref="HasBody"/> is false (Delete).</summary>
+    public string? RequestName { get; init; }
+
+    /// <summary>Where the Request/Response DTOs live (the Contracts target's slice namespace).</summary>
+    public string? ContractsNamespace { get; init; }
+
+    /// <summary>True when the endpoint references Request/Response types from a different namespace (Clean Architecture Contracts project).</summary>
+    public required bool HasContractsUsing { get; init; }
+
+    /// <summary>
+    /// The expression returned when the dispatched Result succeeds — precomputed per operation so
+    /// status-code policy (201 Create / 200 Update / 204 Delete) lives in adapter code, not the template.
+    /// </summary>
+    public required string SuccessExpression { get; init; }
 }

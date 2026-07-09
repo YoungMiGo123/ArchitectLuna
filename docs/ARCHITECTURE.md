@@ -9,20 +9,30 @@
 
 1. **Intent Model** — `.architect/model.yaml`, a small YAML document: solution name, root
    namespace, chosen adapter, and a list of features. Each feature holds entities, commands, and
-   queries. It is hand-edited indirectly, through the `add feature` / `add entity` / `add
-   command` / `add query` CLI commands — see `ArchitectLuna.Core/Model/*.cs`.
+   queries. It is hand-edited indirectly, through the `add feature` / `add entity` / `add crud` /
+   `add command` / `add query` CLI commands — see `ArchitectLuna.Core/Model/*.cs`. All mutations
+   go through `ModelEditor` (`ArchitectLuna.Core/Editing/ModelEditor.cs`), which owns the
+   ordering/duplicate rules (feature before entity, entity before CRUD, bespoke commands/queries
+   allowed without an entity, duplicates rejected without partial mutation) so the CLI and UI are
+   thin presenters and the rules are unit-testable in one place.
 2. **Entity → CRUD synthesis** — `add entity` is the primary way commands/queries get created.
    `CrudSynthesizer` (`ArchitectLuna.Core/Model/CrudSynthesizer.cs`) expands one `EntityModel`
    into the standard Create/Update/Delete commands and GetById/GetAll queries, so the model is
-   built outward from entities rather than assembled command-by-command. `add command`/`add
-   query` remain available for anything a standard CRUD shape doesn't cover.
+   built outward from entities rather than assembled command-by-command. `add crud` re-synthesizes
+   missing operations for an existing entity; `add command`/`add query` remain available for
+   anything a standard CRUD shape doesn't cover.
 3. **Validation** — `ModelValidator` checks the model before generation (known adapter, no
    duplicate feature/command/query/field names) and fails fast with a readable error list.
 4. **Adapter dispatch** — `IFrameworkAdapter` (`ArchitectLuna.Core/Generation/IFrameworkAdapter.cs`)
    is the single seam between "what the model says" and "what code gets written." `MediatRAdapter`
    and `WolverineAdapter` both implement it. Given a `FeatureModel` + `CommandModel`/`QueryModel`,
    an adapter returns a list of `GeneratedFile` (relative path + rendered content) — it does no
-   file I/O itself.
+   file I/O itself. Per operation, an adapter emits the message record, the `{Op}Result` record,
+   the handler (returning `Result<{Op}Result>`), the FluentValidation validator (body-carrying
+   commands only), `{Op}Request`/`{Op}Response` DTOs (to the Contracts target), explicit
+   extension-method mappings (`{Op}Mappings`), and the endpoint. Endpoints translate a failed
+   result via the scaffolded `ResultHttpExtensions.ToProblem()` and map success to 201 (Create),
+   200 (Update/queries), or 204 (Delete).
 5. **Route inference** — `RouteInference` (`ArchitectLuna.Core/Naming/RouteInference.cs`) is
    shared by both adapters so the same model always produces the same route shape regardless of
    `--adapter`: `POST /api/{feature}` for Create, `PUT`/`DELETE /api/{feature}/{id}` for
@@ -60,34 +70,35 @@
 ## Layout: `GenerationContext` and the vertical-slice/Clean-Architecture split
 
 `GenerationContext` (`ArchitectLuna.Core/Generation/GenerationContext.cs`) is the seam that lets one
-model produce either output shape. It carries four independent `ProjectTarget`s (project root path +
-namespace) — `Api`, `Application`, `Domain`, `Infrastructure` — instead of a single project root.
-Adapters and persistence generators never branch on layout directly; they always ask "where does the
-Application target live" or "where does the Domain target live" and get the right answer:
+model produce either output shape. It carries five independent `ProjectTarget`s (project root path +
+namespace) — `Api`, `Application`, `Domain`, `Infrastructure`, `Contracts` — instead of a single
+project root. Adapters and persistence generators never branch on layout directly; they always ask
+"where does the Application target live" or "where does the Contracts target live" and get the
+right answer:
 
 - **`GenerationContext.ForVerticalSlice`** collapses everything into one physical project:
-  `Api`/`Application` both resolve to the Api project root; `Domain`/`Infrastructure` both resolve
-  to a `Persistence` sub-namespace/folder inside it. This is byte-for-byte compatible with the
-  original single-project output — not just behaviorally similar — which is verified by
-  `GeneratedSolutionBuildTests`.
+  `Api`/`Application`/`Contracts` all resolve to the Api project root (so Request/Response DTOs
+  stay inside their feature slice); `Domain`/`Infrastructure` both resolve to a `Persistence`
+  sub-namespace/folder inside it.
 - **`GenerationContext.ForCleanArchitecture`** points each target at a genuinely separate project
-  (`src/{Solution}.Api`, `.Application`, `.Domain`, `.Infrastructure`), dependency rule pointing
-  inward: entities go to Domain, messages/handlers/validators to Application, EF configs/DbContext
-  to Infrastructure, endpoints stay in Api.
+  (`src/{Solution}.Api`, `.Application`, `.Domain`, `.Infrastructure`, `.Contracts`), dependency
+  rule pointing inward: entities go to Domain, messages/handlers/validators/mappings to
+  Application, Request/Response DTOs to Contracts (referenced by Application and Api, referencing
+  nothing), EF configs/DbContext to Infrastructure, endpoints stay in Api.
 
 `GenerationContext.HasSeparateInfrastructure` (true only for Clean Architecture) is the signal EF
 Core's persistence generator uses to avoid an illegal `Application → Infrastructure` project
 reference: when true, it emits an `I{Solution}DbContext` interface *in Application* (owning the
 abstraction, per the Dependency Inversion Principle) with a `DbSet<T>` per entity, and the concrete
-`DbContext` *in Infrastructure* implements it. Handlers depend on the interface; `Program.cs` (the
-Api project, the composition root) wires the concrete type to it with
+`DbContext` *in Infrastructure* implements it. Handlers depend on the interface; the generated
+`AddInfrastructure` extension wires the concrete type to it with
 `AddScoped<IFooDbContext>(sp => sp.GetRequiredService<FooDbContext>())`. For vertical slice, where
 there's only one project anyway, this indirection is skipped entirely — handlers depend on the
 concrete `DbContext` directly, exactly as before this abstraction existed.
 
 One consequence worth knowing: a **freshly scaffolded solution must compile before the first
-`generate` run**, but `Program.cs` already references the DbContext type as soon as EF Core
-persistence is configured. `SolutionScaffolder` handles this by calling
+`generate` run**, but the generated `AddInfrastructure` already references the DbContext type as
+soon as EF Core persistence is configured. `SolutionScaffolder` handles this by calling
 `IPersistenceGenerator.GenerateSolutionPersistence` at scaffold time too, with zero entities — EF
 Core's implementation always emits the DbContext (with zero `DbSet`s, and no `using` for an
 `Entities` namespace nothing has populated yet, which would otherwise be a compile error) rather
@@ -96,20 +107,46 @@ than early-returning when there's nothing to generate yet. `generate` re-renders
 
 `ArchitectLuna.Cli/Scaffolding` mirrors this split: `SolutionScaffolder` orchestrates either
 `ScaffoldVerticalSlice` or `ScaffoldCleanArchitecture`; `ProjectFiles`, `ProgramCsBuilder`,
-`InfrastructureFiles`, and `TestProjectScaffolder` hold the shared, layout-agnostic pieces (csproj/
-`Directory.Build.props` content, `Program.cs`, Dockerfile/docker-compose/appsettings/
-launchSettings, xUnit test projects) so neither layout duplicates them.
+`FoundationFiles`, `InfrastructureFiles`, and `TestProjectScaffolder` hold the shared,
+layout-agnostic pieces (csproj/`Directory.Build.props` content, `Program.cs`, the production
+foundation, Dockerfile/docker-compose/appsettings/launchSettings/docs/.editorconfig, xUnit test
+projects) so neither layout duplicates them.
+
+## The production foundation and the clean-startup contract
+
+`FoundationFiles` (`ArchitectLuna.Cli/Scaffolding/FoundationFiles.cs`) builds every scaffold-time
+foundation file as a pure function from `GenerationContext` (+ adapter/persistence choice) to
+`GeneratedFile` records — which is what lets `ArchitectLuna.Template.Tests` verify the whole
+foundation with zero file/process I/O. It emits, per project target: the Result pattern
+(`Result`/`Result<T>`/`Error`+`ErrorType`/`ValidationError`/`PagedResult<T>`) and the
+`IUserContext`/`IDateTimeProvider` abstractions into Application; `BaseEntity` into Domain;
+`SystemDateTimeProvider` and the `AddInfrastructure` extension into Infrastructure; and the HTTP
+concerns into Api (`IEndpointDefinition`, exception + correlation-ID middleware,
+`ResultHttpExtensions.ToProblem()`, `HttpUserContext`, and the `AddApi`/`UseApiMiddleware`/
+`MapApiEndpoints`/`UseApiLogging` extensions).
+
+`Program.cs` (built by `ProgramCsBuilder`) is only ever the required clean shape — `UseApiLogging`,
+`AddApi`/`AddApplication`/`AddInfrastructure`, `UseApiMiddleware`, `MapApiEndpoints` — and is
+scaffold-time-only, never regenerated per feature. The one adapter-specific deviation: Wolverine's
+handler discovery is an `IHostBuilder` concern, so Wolverine solutions carry one extra
+`builder.Host.UseWolverine(opts => { opts.UseRuntimeCompilation(); ... })` block
+(`UseRuntimeCompilation` matters: core WolverineFx stopped shipping the runtime compiler, so
+without it — and the `WolverineFx.RuntimeCompilation` package the adapter now requires — a
+generated app compiles fine but throws at startup). Persistence registration reaches the generated
+`AddInfrastructure` through `IPersistenceGenerator.BuildServiceRegistration`, whose lines reference
+`services`/`configuration` — never `builder.` — because no provider is allowed to touch
+`Program.cs` anymore.
 
 ## Component map
 
 | Project | Responsibility |
 |---|---|
-| `ArchitectLuna.Core` | Intent Model, naming/route inference, validation, protected-region merge, manifest, `IFrameworkAdapter`/`IPersistenceGenerator` contracts. No knowledge of MediatR/Wolverine/EF Core/Marten/Scriban. |
+| `ArchitectLuna.Core` | Intent Model, `ModelEditor` (ordering/duplicate rules for all model mutations), naming/route inference, validation, protected-region merge, manifest, `IFrameworkAdapter`/`IPersistenceGenerator` contracts. No knowledge of MediatR/Wolverine/EF Core/Marten/Scriban. |
 | `ArchitectLuna.Templates` | Scriban engine wrapper + embedded `.sbn` templates. No knowledge of the CLI or the Intent Model's YAML shape. |
 | `ArchitectLuna.Adapters.MediatR` / `ArchitectLuna.Adapters.Wolverine` | Implement `IFrameworkAdapter`; each depends only on `Core` and `Templates`, not on each other, so a third-party adapter can be added the same way without touching existing ones. |
 | `ArchitectLuna.Persistence.InMemory` / `ArchitectLuna.Persistence.EfCore` / `ArchitectLuna.Persistence.Marten` | Implement `IPersistenceGenerator`; same independence property as the messaging adapters — a provider only ever adds new files, it never needs to modify another provider or adapter. InMemory is the `new api` default: zero NuGet packages, zero external process, real CRUD backed by a generated in-process store. |
 | `ArchitectLuna.Ui` | Razor Pages app built directly on `Core` (no CLI dependency for model reads/writes, confirming Core's zero-console-I/O boundary is real) plus a runtime-only shell-out to the built CLI for `generate`. |
-| `ArchitectLuna.Cli` | Spectre.Console.Cli entry point (`new`, `add feature/entity/command/query`, `generate`) plus `Scaffolding/` (`SolutionScaffolder` + `ProjectFiles`/`ProgramCsBuilder`/`InfrastructureFiles`/`TestProjectScaffolder`), which shells out to the real `dotnet` CLI for `.sln`/project creation and package references so version resolution always comes from the live NuGet feed. `AdapterRegistry`/`PersistenceRegistry` resolve `--adapter`/`--persistence` strings to concrete implementations — this is the one place that knows about every adapter and provider by name. |
+| `ArchitectLuna.Cli` | Spectre.Console.Cli entry point (`new`, `add feature/entity/crud/command/query`, `generate`) plus `Scaffolding/` (`SolutionScaffolder` + `ProjectFiles`/`ProgramCsBuilder`/`FoundationFiles`/`InfrastructureFiles`/`TestProjectScaffolder`), which shells out to the real `dotnet` CLI for `.sln`/project creation and package references so version resolution always comes from the live NuGet feed. `AdapterRegistry`/`PersistenceRegistry` resolve `--adapter`/`--persistence` strings to concrete implementations — this is the one place that knows about every adapter and provider by name. |
 
 ## Why Scriban, and a known environment gotcha
 

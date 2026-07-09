@@ -2,6 +2,10 @@ using FluentValidation;
 using {{ dispatcher_using }};
 using {{ api_root_namespace }}.Common;
 using {{ message_namespace }};
+using {{ results_namespace }};
+{{ if has_contracts_using }}
+using {{ contracts_namespace }};
+{{ end }}
 
 namespace {{ namespace }};
 
@@ -10,27 +14,9 @@ public sealed class {{ endpoint_name }} : IEndpointDefinition
     public void Map(IEndpointRouteBuilder app)
     {
         {{ if has_route_id && has_body }}
-        app.{{ http_map_method }}("{{ route }}", async (Guid id, {{ message_name }} command, IValidator<{{ message_name }}> validator, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken) =>
+        app.{{ http_map_method }}("{{ route }}", async (Guid id, {{ request_name }} request, IValidator<{{ message_name }}> validator, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken) =>
         {
-            var resolvedCommand = command with { Id = id };
-            var validationResult = await validator.ValidateAsync(resolvedCommand, cancellationToken);
-            if (!validationResult.IsValid)
-            {
-                return Results.ValidationProblem(validationResult.ToDictionary());
-            }
-
-            var result = await {{ dispatch_call }};
-            return Results.Ok(result);
-        });
-        {{ else if has_route_id }}
-        app.{{ http_map_method }}("{{ route }}", async (Guid id, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken) =>
-        {
-            var result = await {{ dispatch_call }};
-            return Results.Ok(result);
-        });
-        {{ else }}
-        app.{{ http_map_method }}("{{ route }}", async ({{ message_name }} command, IValidator<{{ message_name }}> validator, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken) =>
-        {
+            var command = request.ToCommand(id);
             var validationResult = await validator.ValidateAsync(command, cancellationToken);
             if (!validationResult.IsValid)
             {
@@ -38,7 +24,32 @@ public sealed class {{ endpoint_name }} : IEndpointDefinition
             }
 
             var result = await {{ dispatch_call }};
-            return Results.Ok(result);
+            return result.IsSuccess
+                ? {{ success_expression }}
+                : result.ToProblem();
+        });
+        {{ else if has_route_id }}
+        app.{{ http_map_method }}("{{ route }}", async (Guid id, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken) =>
+        {
+            var result = await {{ dispatch_call }};
+            return result.IsSuccess
+                ? {{ success_expression }}
+                : result.ToProblem();
+        });
+        {{ else }}
+        app.{{ http_map_method }}("{{ route }}", async ({{ request_name }} request, IValidator<{{ message_name }}> validator, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken) =>
+        {
+            var command = request.ToCommand();
+            var validationResult = await validator.ValidateAsync(command, cancellationToken);
+            if (!validationResult.IsValid)
+            {
+                return Results.ValidationProblem(validationResult.ToDictionary());
+            }
+
+            var result = await {{ dispatch_call }};
+            return result.IsSuccess
+                ? {{ success_expression }}
+                : result.ToProblem();
         });
         {{ end }}
     }

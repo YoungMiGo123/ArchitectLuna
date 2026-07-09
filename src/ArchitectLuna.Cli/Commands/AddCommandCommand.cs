@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using ArchitectLuna.Cli.Parsing;
+using ArchitectLuna.Core.Editing;
 using ArchitectLuna.Core.Model;
-using ArchitectLuna.Core.Workspace;
 using ArchitectLuna.Core.Yaml;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -28,26 +28,17 @@ public sealed class AddCommandCommandSettings : CommandSettings
     public string Kind { get; init; } = "create";
 }
 
+/// <summary>Bespoke commands are allowed without an entity (Ordering Rule 4) — not every operation is standard CRUD.</summary>
 public sealed class AddCommandCommand : Command<AddCommandCommandSettings>
 {
     protected override int Execute(CommandContext context, AddCommandCommandSettings settings, CancellationToken cancellationToken)
     {
-        var root = WorkspaceLocator.Locate(Directory.GetCurrentDirectory());
-        var modelPath = Path.Combine(root, ".architect", "model.yaml");
+        if (!WorkspaceGuard.TryLocateModelPath(out var modelPath))
+        {
+            return 1;
+        }
+
         var model = ModelSerializer.Load(modelPath);
-
-        var feature = model.Features.FirstOrDefault(f => f.Name == settings.Feature);
-        if (feature is null)
-        {
-            AnsiConsole.MarkupLineInterpolated($"[red]Feature '{settings.Feature}' does not exist. Run 'add feature {settings.Feature}' first.[/]");
-            return 1;
-        }
-
-        if (feature.Commands.Any(c => c.Name == settings.Name))
-        {
-            AnsiConsole.MarkupLineInterpolated($"[red]Command '{settings.Name}' already exists in feature '{settings.Feature}'.[/]");
-            return 1;
-        }
 
         CommandKind kind;
         try
@@ -57,12 +48,6 @@ public sealed class AddCommandCommand : Command<AddCommandCommandSettings>
         catch (InvalidOperationException ex)
         {
             AnsiConsole.MarkupLineInterpolated($"[red]{ex.Message}[/]");
-            return 1;
-        }
-
-        if (kind == CommandKind.Delete && settings.Fields.Length > 0)
-        {
-            AnsiConsole.MarkupLine("[red]A delete command takes no --field values — it only binds the id from the route.[/]");
             return 1;
         }
 
@@ -81,18 +66,14 @@ public sealed class AddCommandCommand : Command<AddCommandCommandSettings>
             field.Rules.Add(rule);
         }
 
-        if (kind == CommandKind.Delete)
+        var result = ModelEditor.AddCommand(model, settings.Feature, settings.Name, kind, fields);
+        if (!result.Success)
         {
-            fields.Add(new FieldModel { Name = "Id", Type = "Guid" });
-        }
-        else if (kind == CommandKind.Update && fields.All(f => f.Name != "Id"))
-        {
-            fields.Insert(0, new FieldModel { Name = "Id", Type = "Guid" });
+            AnsiConsole.MarkupLineInterpolated($"[red]{result.Error}[/]");
+            return 1;
         }
 
-        feature.Commands.Add(new CommandModel { Name = settings.Name, Kind = kind, Fields = fields });
         ModelSerializer.Save(modelPath, model);
-
         AnsiConsole.MarkupLineInterpolated($"[green]Added command '{settings.Name}' to feature '{settings.Feature}'.[/]");
         return 0;
     }

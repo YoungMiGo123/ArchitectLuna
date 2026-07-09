@@ -1,6 +1,5 @@
 using ArchitectLuna.Cli.Parsing;
-using ArchitectLuna.Core.Model;
-using ArchitectLuna.Core.Workspace;
+using ArchitectLuna.Core.Editing;
 using ArchitectLuna.Core.Yaml;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -19,32 +18,28 @@ public sealed class AddQueryCommandSettings : CommandSettings
     public string[] Params { get; init; } = Array.Empty<string>();
 }
 
+/// <summary>Bespoke queries are allowed without an entity (Ordering Rule 4) — not every operation is standard CRUD.</summary>
 public sealed class AddQueryCommand : Command<AddQueryCommandSettings>
 {
     protected override int Execute(CommandContext context, AddQueryCommandSettings settings, CancellationToken cancellationToken)
     {
-        var root = WorkspaceLocator.Locate(Directory.GetCurrentDirectory());
-        var modelPath = Path.Combine(root, ".architect", "model.yaml");
+        if (!WorkspaceGuard.TryLocateModelPath(out var modelPath))
+        {
+            return 1;
+        }
+
         var model = ModelSerializer.Load(modelPath);
-
-        var feature = model.Features.FirstOrDefault(f => f.Name == settings.Feature);
-        if (feature is null)
-        {
-            AnsiConsole.MarkupLineInterpolated($"[red]Feature '{settings.Feature}' does not exist. Run 'add feature {settings.Feature}' first.[/]");
-            return 1;
-        }
-
-        if (feature.Queries.Any(q => q.Name == settings.Name))
-        {
-            AnsiConsole.MarkupLineInterpolated($"[red]Query '{settings.Name}' already exists in feature '{settings.Feature}'.[/]");
-            return 1;
-        }
 
         var parameters = settings.Params.Select(SpecParser.ParseParam).ToList();
 
-        feature.Queries.Add(new QueryModel { Name = settings.Name, Params = parameters });
-        ModelSerializer.Save(modelPath, model);
+        var result = ModelEditor.AddQuery(model, settings.Feature, settings.Name, parameters);
+        if (!result.Success)
+        {
+            AnsiConsole.MarkupLineInterpolated($"[red]{result.Error}[/]");
+            return 1;
+        }
 
+        ModelSerializer.Save(modelPath, model);
         AnsiConsole.MarkupLineInterpolated($"[green]Added query '{settings.Name}' to feature '{settings.Feature}'.[/]");
         return 0;
     }

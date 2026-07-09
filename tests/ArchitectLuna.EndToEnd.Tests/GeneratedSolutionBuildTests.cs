@@ -41,7 +41,7 @@ public sealed class GeneratedSolutionBuildTests
         var workDir = TempWorkspace.CreateUnique();
         try
         {
-            var newApi = ProcessRunner.RunCli(cliDllPath, workDir, "new", "api", SolutionName, "--adapter", adapter, "--persistence", persistence);
+            var newApi = ProcessRunner.RunCli(cliDllPath, workDir, "new", "api", SolutionName, "--adapter", adapter, "--persistence", persistence, "--architecture", "vertical-slice");
             Assert.True(newApi.ExitCode == 0, $"'new api' (adapter={adapter}, persistence={persistence}) failed:\n{newApi}");
 
             var solutionRoot = Path.Combine(workDir, SolutionName);

@@ -6,11 +6,17 @@ namespace ArchitectLuna.EndToEnd.Tests;
 /// <summary>
 /// Same full-pipeline coverage as <see cref="GeneratedSolutionBuildTests"/> but for
 /// `--architecture clean-architecture`: scaffold, add a feature/entity, generate, and build the
-/// real four-project solution (Api/Application/Domain/Infrastructure) plus both test projects.
-/// Exists specifically to catch what a vertical-slice-only test suite can't: Application
-/// referencing Infrastructure directly (breaking the dependency rule), a persistence type used in
-/// Program.cs before any entity exists, or a namespace `using` for a folder that has no files in it
-/// yet — all bugs that only show up once source is actually split across separate projects.
+/// real five-project solution (Api/Application/Domain/Infrastructure/Contracts) plus the three
+/// test projects. Exists specifically to catch what a vertical-slice-only test suite can't:
+/// Application referencing Infrastructure directly (breaking the dependency rule), a persistence
+/// type used in startup code before any entity exists, or a namespace `using` for a folder that
+/// has no files in it yet — all bugs that only show up once source is actually split across
+/// separate projects.
+///
+/// The combinations below cover both adapters and every persistence provider at least once; the
+/// exhaustive adapter × persistence × architecture matrix runs as parallel CI smoke jobs
+/// (.github/workflows/ci.yml), where each cell gets its own runner instead of serializing ~20
+/// scaffold+build cycles inside this one test process.
 /// </summary>
 public sealed class CleanArchitectureBuildTests
 {
@@ -23,6 +29,8 @@ public sealed class CleanArchitectureBuildTests
     [InlineData("mediatr", "efcore-postgres")]
     [InlineData("wolverine", "marten")]
     [InlineData("mediatr", "none")]
+    [InlineData("wolverine", "in-memory")]
+    [InlineData("mediatr", "efcore-sqlserver")]
     public void CleanArchitectureSolution_Compiles_WithProperLayering(string adapter, string persistence)
     {
         var cliDllPath = CliLocator.ResolveCliDllPath();
@@ -55,7 +63,7 @@ public sealed class CleanArchitectureBuildTests
             var generate = ProcessRunner.RunCli(cliDllPath, solutionRoot, "generate");
             Assert.True(generate.ExitCode == 0, $"'generate' failed:\n{generate}");
 
-            AssertProperLayering(solutionRoot);
+            AssertProperLayering(solutionRoot, persistence);
 
             var build = ProcessRunner.RunDotnetBuild(solutionRoot, TimeSpan.FromMinutes(5));
             Assert.True(build.ExitCode == 0, $"'dotnet build' after generate (adapter={adapter}, persistence={persistence}) failed:\n{build}");
@@ -66,15 +74,24 @@ public sealed class CleanArchitectureBuildTests
         }
     }
 
-    /// <summary>Entities live in Domain, messages/handlers/validators in Application, endpoints in Api — never mixed up across projects.</summary>
-    private static void AssertProperLayering(string solutionRoot)
+    /// <summary>Entities live in Domain (or Documents for Marten), messages/handlers/mappings in Application, Request/Response DTOs in Contracts, endpoints in Api — never mixed up across projects.</summary>
+    private static void AssertProperLayering(string solutionRoot, string persistence)
     {
-        var domainEntityPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Domain", "Entities", $"{EntityName}.cs");
+        var entityFolder = persistence == "marten" ? "Documents" : "Entities";
+        var domainEntityPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Domain", entityFolder, $"{EntityName}.cs");
         var applicationHandlerPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Application", "Features", FeatureName, $"Create{EntityName}", $"Create{EntityName}Handler.cs");
+        var applicationMappingsPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Application", "Features", FeatureName, $"Create{EntityName}", $"Create{EntityName}Mappings.cs");
+        var contractsRequestPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Contracts", "Features", FeatureName, $"Create{EntityName}", $"Create{EntityName}Request.cs");
         var apiEndpointPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Api", "Features", FeatureName, $"Create{EntityName}", $"Create{EntityName}Endpoint.cs");
 
-        Assert.True(File.Exists(domainEntityPath), $"Expected entity in Domain project at {domainEntityPath}");
+        if (persistence != "none")
+        {
+            Assert.True(File.Exists(domainEntityPath), $"Expected entity in Domain project at {domainEntityPath}");
+        }
+
         Assert.True(File.Exists(applicationHandlerPath), $"Expected handler in Application project at {applicationHandlerPath}");
+        Assert.True(File.Exists(applicationMappingsPath), $"Expected mappings in Application project at {applicationMappingsPath}");
+        Assert.True(File.Exists(contractsRequestPath), $"Expected request DTO in Contracts project at {contractsRequestPath}");
         Assert.True(File.Exists(apiEndpointPath), $"Expected endpoint in Api project at {apiEndpointPath}");
     }
 }

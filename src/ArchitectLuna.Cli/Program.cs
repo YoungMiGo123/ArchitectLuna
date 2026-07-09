@@ -24,6 +24,7 @@ app.Configure(config =>
     {
         addBranch.AddCommand<AddFeatureCommand>("feature");
         addBranch.AddCommand<AddEntityCommand>("entity");
+        addBranch.AddCommand<AddCrudCommand>("crud");
         addBranch.AddCommand<AddCommandCommand>("command");
         addBranch.AddCommand<AddQueryCommand>("query");
     });
