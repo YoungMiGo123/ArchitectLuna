@@ -14,6 +14,7 @@ public sealed class ModelValidatorTests
             SolutionName = "BillingService",
             Namespace = "BillingService",
             Adapter = "mediatr",
+            Layout = SolutionLayout.VerticalSlice,
             Features = new List<FeatureModel>
             {
                 new()
@@ -33,12 +34,23 @@ public sealed class ModelValidatorTests
     [Fact]
     public void Validate_UnknownAdapter_ReportsError()
     {
-        var model = new ArchitectModel { SolutionName = "X", Namespace = "X", Adapter = "not-real" };
+        var model = new ArchitectModel { SolutionName = "X", Namespace = "X", Adapter = "not-real", Layout = SolutionLayout.VerticalSlice };
 
         var result = ModelValidator.Validate(model);
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, e => e.Contains("adapter"));
+    }
+
+    [Fact]
+    public void Validate_MissingLayout_ReportsError()
+    {
+        var model = new ArchitectModel { SolutionName = "X", Namespace = "X", Adapter = "mediatr" };
+
+        var result = ModelValidator.Validate(model);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Contains("layout"));
     }
 
     [Fact]
@@ -49,6 +61,7 @@ public sealed class ModelValidatorTests
             SolutionName = "X",
             Namespace = "X",
             Adapter = "mediatr",
+            Layout = SolutionLayout.VerticalSlice,
             Features = new List<FeatureModel> { new() { Name = "Invoices" }, new() { Name = "Invoices" } },
         };
 
@@ -66,6 +79,7 @@ public sealed class ModelValidatorTests
             SolutionName = "X",
             Namespace = "X",
             Adapter = "mediatr",
+            Layout = SolutionLayout.VerticalSlice,
             Features = new List<FeatureModel>
             {
                 new()

@@ -63,9 +63,11 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
     {
         var resultName = $"{query.Name}Result";
 
-        var body = query.IsCollection
-            ? RenderGetAllBody(entity, resultName)
-            : RenderGetByIdBody(entity, resultName);
+        var body = query.IsPaged
+            ? RenderPagedGetAllBody(entity, resultName)
+            : query.IsCollection
+                ? RenderGetAllBody(entity, resultName)
+                : RenderGetByIdBody(entity, resultName);
 
         return new HandlerBinding(body, "IDocumentSession", "session", HandlerUsings(context));
     }
@@ -185,6 +187,18 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         var sb = new StringBuilder();
         sb.AppendLine($"var entities = await session.Query<{entity.Name}>().ToListAsync(cancellationToken);");
         sb.Append($"return Result<IReadOnlyList<{resultName}>>.Success(entities.Select(entity => new {resultName}({args})).ToList());");
+        return sb.ToString();
+    }
+
+    private static string RenderPagedGetAllBody(EntityModel entity, string resultName)
+    {
+        var args = string.Join(", ", new[] { "entity.Id" }.Concat(entity.Fields.Select(f => $"entity.{f.Name}")));
+        var sb = new StringBuilder();
+        sb.AppendLine("var page = message.Page <= 0 ? 1 : message.Page;");
+        sb.AppendLine("var pageSize = message.PageSize <= 0 ? 20 : message.PageSize;");
+        sb.AppendLine($"var totalCount = (long)await session.Query<{entity.Name}>().CountAsync(cancellationToken);");
+        sb.AppendLine($"var entities = await session.Query<{entity.Name}>().OrderBy(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);");
+        sb.Append($"return Result<PagedResult<{resultName}>>.Success(new PagedResult<{resultName}>(entities.Select(entity => new {resultName}({args})).ToList(), page, pageSize, totalCount));");
         return sb.ToString();
     }
 }

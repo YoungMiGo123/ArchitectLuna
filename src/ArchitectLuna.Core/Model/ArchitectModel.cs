@@ -23,9 +23,10 @@ public sealed class ArchitectModel
     public PersistenceProvider Persistence { get; init; } = PersistenceProvider.None;
 
     /// <summary>
-    /// Output shape. Defaults to VerticalSlice, preserving the original single-project behavior.
+    /// Output shape: VerticalSlice or CleanArchitecture. No default — a model.yaml missing this
+    /// key fails validation instead of silently resolving to VerticalSlice.
     /// </summary>
-    public SolutionLayout Layout { get; init; } = SolutionLayout.VerticalSlice;
+    public SolutionLayout? Layout { get; init; }
 
     public List<FeatureModel> Features { get; init; } = new();
 }

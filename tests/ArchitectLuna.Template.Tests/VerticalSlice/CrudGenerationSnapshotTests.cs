@@ -72,7 +72,7 @@ public sealed class CrudGenerationSnapshotTests
         Assert.Contains("Results.Created(", GenerationTestHarness.ContentOf(files, $"{Features}/CreateInvoice/CreateInvoiceEndpoint.cs"));
         Assert.Contains("Results.Ok(result.Value.ToResponse())", GenerationTestHarness.ContentOf(files, $"{Features}/UpdateInvoice/UpdateInvoiceEndpoint.cs"));
         Assert.Contains("Results.NoContent()", GenerationTestHarness.ContentOf(files, $"{Features}/DeleteInvoice/DeleteInvoiceEndpoint.cs"));
-        Assert.Contains("Results.Ok(result.Value.Select(item => item.ToResponse()).ToList())", GenerationTestHarness.ContentOf(files, $"{Features}/GetAllInvoices/GetAllInvoicesEndpoint.cs"));
+        Assert.Contains("Results.Ok(new { items = result.Value.Items.Select(item => item.ToResponse()).ToList(), result.Value.Page, result.Value.PageSize, result.Value.TotalCount, result.Value.TotalPages, result.Value.HasNextPage, result.Value.HasPreviousPage })", GenerationTestHarness.ContentOf(files, $"{Features}/GetAllInvoices/GetAllInvoicesEndpoint.cs"));
 
         foreach (var operation in new[] { "CreateInvoice", "UpdateInvoice", "DeleteInvoice", "GetInvoiceById", "GetAllInvoices" })
         {

@@ -21,6 +21,14 @@ public sealed class QueryModel
     public bool IsCollection { get; init; }
 
     /// <summary>
+    /// True for a CRUD-synthesized GetAll query: the result is wrapped as
+    /// PagedResult&lt;TResult&gt; instead of a raw list, and the generated handler pages
+    /// (Skip/Take or provider equivalent) instead of loading every row. Page/PageSize never join
+    /// <see cref="Params"/> — they're query-string-only and must not affect route inference.
+    /// </summary>
+    public bool IsPaged { get; init; }
+
+    /// <summary>
     /// Explicit route override. Null means the adapter infers a default route.
     /// </summary>
     public string? Route { get; init; }

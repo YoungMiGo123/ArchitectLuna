@@ -12,3 +12,4 @@ delete completed plans — they are the design history of the project.
 | # | Plan | Status |
 |---|---|---|
 | 001 | [Production foundation + testing layer](001-production-foundation-and-testing-layer.md) | Done |
+| 002 | [Pagination for generated GetAll queries](002-crud-getall-pagination.md) | Implemented, verification pending |
