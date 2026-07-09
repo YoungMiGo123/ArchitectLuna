@@ -9,8 +9,9 @@ It supports two interchangeable backend adapters — **MediatR** and **Wolverine
 different implementations from the *same* model, four interchangeable persistence providers —
 **In-Memory**, **EF Core / Postgres**, **EF Core / SQL Server**, and **Marten** — that plug real
 CRUD into generated handlers, and two interchangeable solution layouts — **Clean Architecture**
-(the default: Api/Application/Domain/Infrastructure/Contracts as five real projects, dependency
-rule pointing inward) and **vertical slice** (one Api project, features live inside it). Switching
+(the default: Api/Application/Domain/Infrastructure as four real projects, dependency rule pointing
+inward — Request/Response DTOs live in a `Contracts/` subfolder of each Application feature slice,
+not a separate project) and **vertical slice** (one Api project, features live inside it). Switching
 `--adapter`
 changes how a request is dispatched (MediatR's `ISender` vs Wolverine's `IMessageBus`); switching
 `--persistence` changes how a handler talks to storage; switching `--architecture` changes which
@@ -198,12 +199,12 @@ dotnet run --project src/BillingService.Api   # POST/GET/PUT/DELETE /api/invoice
 (default, zero setup), `none` (placeholder-only handlers), `efcore-postgres`, `efcore-sqlserver`,
 or `marten` — pass one explicitly to opt into a durable backend, e.g.
 `architect-luna new api BillingService --persistence efcore-postgres`. `--architecture` is
-`clean-architecture` (default: Api/Application/Domain/Infrastructure/Contracts, dependency rule
-pointing inward — Application never references Infrastructure directly; the concrete DbContext
-implements an interface Application owns) or `vertical-slice`.
+`clean-architecture` (default: Api/Application/Domain/Infrastructure, dependency rule pointing
+inward — Application never references Infrastructure directly; the concrete DbContext implements
+an interface Application owns) or `vertical-slice`.
 
 ```bash
-# Same model, one project instead of five — every slice self-contained under Features/
+# Same model, one project instead of four — every slice self-contained under Features/
 architect-luna new api BillingService --adapter mediatr --persistence efcore-postgres --architecture vertical-slice
 ```
 
@@ -236,9 +237,9 @@ For an `Invoice` entity in an `Invoices` feature, `generate` renders (per adapte
 slice per command/query. Where those files land depends on `--architecture`:
 
 - **clean-architecture** (default): the command/result/handler/validator/mappings under
-  `src/{Solution}.Application/Features/Invoices/...`, the Request/Response DTOs under
-  `src/{Solution}.Contracts/Features/Invoices/...`, the endpoint under
-  `src/{Solution}.Api/Features/Invoices/...`.
+  `src/{Solution}.Application/Features/Invoices/...`, the Request/Response DTOs under that same
+  slice's `Contracts/` subfolder (`src/{Solution}.Application/Features/Invoices/.../Contracts/`),
+  the endpoint under `src/{Solution}.Api/Features/Invoices/...`.
 - **vertical-slice**: everything under `src/{Solution}.Api/Features/Invoices/...`.
 
 | Operation | Route | Success | Files |
@@ -340,7 +341,7 @@ M1–M4 are done: every adapter × persistence × architecture combination gener
 production-ready solution end to end, verified by actually scaffolding and building sample
 projects (automated in `ArchitectLuna.EndToEnd.Tests`, not just eyeballed by hand). Entity-driven
 CRUD synthesis, a zero-setup in-memory persistence provider (the `new api` default), real EF
-Core/Marten persistence, Clean Architecture (now the default layout, with a Contracts project),
+Core/Marten persistence, Clean Architecture (now the default layout),
 the full production foundation (Result pattern, BaseEntity, user-context/date-time abstractions,
 correlation-ID + exception middleware, mapping layer, extension-method startup — see
 `docs/requirements/001-implementation-architecture.md`), the three-tier test strategy

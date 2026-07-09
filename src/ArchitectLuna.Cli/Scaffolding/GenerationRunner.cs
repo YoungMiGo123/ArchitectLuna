@@ -43,8 +43,7 @@ public static class GenerationRunner
                 $"src/{model.SolutionName}.Api",
                 $"src/{model.SolutionName}.Application",
                 $"src/{model.SolutionName}.Domain",
-                $"src/{model.SolutionName}.Infrastructure",
-                $"src/{model.SolutionName}.Contracts")
+                $"src/{model.SolutionName}.Infrastructure")
             : GenerationContext.ForVerticalSlice(model.Namespace, $"src/{model.SolutionName}.Api");
         var manifest = ManifestStore.Load(manifestPath);
 

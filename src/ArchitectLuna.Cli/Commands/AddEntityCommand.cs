@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using ArchitectLuna.Cli.Parsing;
 using ArchitectLuna.Core.Editing;
 using ArchitectLuna.Core.Model;
@@ -20,6 +21,11 @@ public sealed class AddEntityCommandSettings : CommandSettings
 
     [CommandOption("--rule")]
     public string[] Rules { get; init; } = Array.Empty<string>();
+
+    [CommandOption("--yes|--create-missing")]
+    [Description("Create the feature automatically if it doesn't exist yet, without prompting.")]
+    [DefaultValue(false)]
+    public bool CreateMissing { get; init; }
 }
 
 /// <summary>
@@ -39,6 +45,11 @@ public sealed class AddEntityCommand : Command<AddEntityCommandSettings>
         }
 
         var model = ModelSerializer.Load(modelPath);
+
+        if (!CompoundCommandSupport.TryEnsureFeatureExists(model, settings.Feature, settings.CreateMissing))
+        {
+            return 1;
+        }
 
         var fields = settings.Fields.Select(SpecParser.ParseField).ToList();
 

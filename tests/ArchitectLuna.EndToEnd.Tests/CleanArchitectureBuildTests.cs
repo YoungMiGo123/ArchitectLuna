@@ -6,8 +6,9 @@ namespace ArchitectLuna.EndToEnd.Tests;
 /// <summary>
 /// Same full-pipeline coverage as <see cref="GeneratedSolutionBuildTests"/> but for
 /// `--architecture clean-architecture`: scaffold, add a feature/entity, generate, and build the
-/// real five-project solution (Api/Application/Domain/Infrastructure/Contracts) plus the three
-/// test projects. Exists specifically to catch what a vertical-slice-only test suite can't:
+/// real four-project solution (Api/Application/Domain/Infrastructure — Request/Response DTOs live
+/// in a `Contracts/` subfolder of each Application feature slice, not a fifth project) plus the
+/// three test projects. Exists specifically to catch what a vertical-slice-only test suite can't:
 /// Application referencing Infrastructure directly (breaking the dependency rule), a persistence
 /// type used in startup code before any entity exists, or a namespace `using` for a folder that
 /// has no files in it yet — all bugs that only show up once source is actually split across
@@ -74,15 +75,16 @@ public sealed class CleanArchitectureBuildTests
         }
     }
 
-    /// <summary>Entities live in Domain (or Documents for Marten), messages/handlers/mappings in Application, Request/Response DTOs in Contracts, endpoints in Api — never mixed up across projects.</summary>
+    /// <summary>Entities live in Domain (or Documents for Marten), messages/handlers/mappings in Application, Request/Response DTOs in a Contracts/ subfolder of the Application slice, endpoints in Api — never mixed up across projects.</summary>
     private static void AssertProperLayering(string solutionRoot, string persistence)
     {
         var entityFolder = persistence == "marten" ? "Documents" : "Entities";
         var domainEntityPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Domain", entityFolder, $"{EntityName}.cs");
         var applicationHandlerPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Application", "Features", FeatureName, $"Create{EntityName}", $"Create{EntityName}Handler.cs");
         var applicationMappingsPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Application", "Features", FeatureName, $"Create{EntityName}", $"Create{EntityName}Mappings.cs");
-        var contractsRequestPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Contracts", "Features", FeatureName, $"Create{EntityName}", $"Create{EntityName}Request.cs");
+        var contractsRequestPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Application", "Features", FeatureName, $"Create{EntityName}", "Contracts", $"Create{EntityName}Request.cs");
         var apiEndpointPath = Path.Combine(solutionRoot, "src", $"{SolutionName}.Api", "Features", FeatureName, $"Create{EntityName}", $"Create{EntityName}Endpoint.cs");
+        var contractsProjectDir = Path.Combine(solutionRoot, "src", $"{SolutionName}.Contracts");
 
         if (persistence != "none")
         {
@@ -91,7 +93,8 @@ public sealed class CleanArchitectureBuildTests
 
         Assert.True(File.Exists(applicationHandlerPath), $"Expected handler in Application project at {applicationHandlerPath}");
         Assert.True(File.Exists(applicationMappingsPath), $"Expected mappings in Application project at {applicationMappingsPath}");
-        Assert.True(File.Exists(contractsRequestPath), $"Expected request DTO in Contracts project at {contractsRequestPath}");
+        Assert.True(File.Exists(contractsRequestPath), $"Expected request DTO under the Application slice's Contracts/ folder at {contractsRequestPath}");
         Assert.True(File.Exists(apiEndpointPath), $"Expected endpoint in Api project at {apiEndpointPath}");
+        Assert.False(Directory.Exists(contractsProjectDir), $"The separate Contracts project must no longer be scaffolded ({contractsProjectDir} should not exist).");
     }
 }

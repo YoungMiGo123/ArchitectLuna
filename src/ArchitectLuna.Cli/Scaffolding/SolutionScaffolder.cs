@@ -14,8 +14,9 @@ namespace ArchitectLuna.Cli.Scaffolding;
 ///
 /// Produces a solution that compiles and runs immediately, in either layout:
 /// <see cref="SolutionLayout.VerticalSlice"/> (one Api project, features live inside it) or
-/// <see cref="SolutionLayout.CleanArchitecture"/> (Api/Application/Domain/Infrastructure/Contracts
-/// as five real projects, dependency rule pointing inward) — both get the full production
+/// <see cref="SolutionLayout.CleanArchitecture"/> (Api/Application/Domain/Infrastructure as four
+/// real projects, dependency rule pointing inward — Request/Response DTOs live in a `Contracts/`
+/// subfolder of each Application feature slice, not a separate project) — both get the full production
 /// foundation (<see cref="FoundationFiles"/>): Result pattern, BaseEntity, user-context and
 /// date/time abstractions, correlation-ID + exception middleware, Serilog request logging,
 /// Swagger, health checks, DI/endpoint/middleware extension methods, Docker, docs, and test
@@ -58,7 +59,7 @@ public static class SolutionScaffolder
         File.WriteAllText(Path.Combine(root, "docker-compose.yml"), InfrastructureFiles.DockerCompose(solutionName, persistenceProvider));
         File.WriteAllText(Path.Combine(root, ".gitignore"), InfrastructureFiles.GitIgnoreContent);
         File.WriteAllText(Path.Combine(root, ".editorconfig"), InfrastructureFiles.EditorConfig());
-        File.WriteAllText(Path.Combine(root, "README.md"), InfrastructureFiles.ReadMe(solutionName, adapterName, persistenceName, layout));
+        File.WriteAllText(Path.Combine(root, "README.md"), InfrastructureFiles.ReadMe(solutionName, adapterName, persistenceName, layout, applyMode));
 
         Directory.CreateDirectory(Path.Combine(root, "docs"));
         File.WriteAllText(Path.Combine(root, "docs", "architecture.md"), InfrastructureFiles.ArchitectureDoc(solutionName, adapterName, persistenceName, layout));
@@ -151,19 +152,13 @@ public static class SolutionScaffolder
         var applicationRelative = $"src/{solutionName}.Application";
         var domainRelative = $"src/{solutionName}.Domain";
         var infrastructureRelative = $"src/{solutionName}.Infrastructure";
-        var contractsRelative = $"src/{solutionName}.Contracts";
 
-        var context = GenerationContext.ForCleanArchitecture(solutionName, apiRelative, applicationRelative, domainRelative, infrastructureRelative, contractsRelative);
+        var context = GenerationContext.ForCleanArchitecture(solutionName, apiRelative, applicationRelative, domainRelative, infrastructureRelative);
 
         var domainDir = Path.Combine(root, domainRelative);
         Directory.CreateDirectory(domainDir);
         var domainCsprojPath = Path.Combine(domainDir, $"{solutionName}.Domain.csproj");
         File.WriteAllText(domainCsprojPath, ProjectFiles.ClassLibrary());
-
-        var contractsDir = Path.Combine(root, contractsRelative);
-        Directory.CreateDirectory(contractsDir);
-        var contractsCsprojPath = Path.Combine(contractsDir, $"{solutionName}.Contracts.csproj");
-        File.WriteAllText(contractsCsprojPath, ProjectFiles.ClassLibrary());
 
         var applicationDir = Path.Combine(root, applicationRelative);
         Directory.CreateDirectory(applicationDir);
@@ -171,7 +166,6 @@ public static class SolutionScaffolder
         File.WriteAllText(applicationCsprojPath, ProjectFiles.ClassLibrary(new[]
         {
             $"../{solutionName}.Domain/{solutionName}.Domain.csproj",
-            $"../{solutionName}.Contracts/{solutionName}.Contracts.csproj",
         }));
 
         var infrastructureDir = Path.Combine(root, infrastructureRelative);
@@ -190,14 +184,12 @@ public static class SolutionScaffolder
         {
             $"../{solutionName}.Application/{solutionName}.Application.csproj",
             $"../{solutionName}.Infrastructure/{solutionName}.Infrastructure.csproj",
-            $"../{solutionName}.Contracts/{solutionName}.Contracts.csproj",
         }));
         WriteApiProjectFiles(apiDir, context, adapterName, PersistenceRegistry.ParseProvider(persistence.Name), persistence, applyMode);
 
         foreach (var (relative, csprojPath) in new[]
         {
             (domainRelative, domainCsprojPath),
-            (contractsRelative, contractsCsprojPath),
             (applicationRelative, applicationCsprojPath),
             (infrastructureRelative, infrastructureCsprojPath),
             (apiRelative, apiCsprojPath),

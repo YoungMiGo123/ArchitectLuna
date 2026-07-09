@@ -27,8 +27,7 @@ public static class GenerationTestHarness
             $"src/{SolutionName}.Api",
             $"src/{SolutionName}.Application",
             $"src/{SolutionName}.Domain",
-            $"src/{SolutionName}.Infrastructure",
-            $"src/{SolutionName}.Contracts");
+            $"src/{SolutionName}.Infrastructure");
 
     public static IPersistenceGenerator Persistence(string name) => name switch
     {

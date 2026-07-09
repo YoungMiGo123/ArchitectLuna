@@ -25,10 +25,10 @@ public sealed class FeatureGenerationSnapshotTests
 
         var expected = new[]
         {
-            $"{Slice}/CreateInvoiceRequest.cs",
+            $"{Slice}/Contracts/CreateInvoiceRequest.cs",
             $"{Slice}/CreateInvoiceCommand.cs",
             $"{Slice}/CreateInvoiceResult.cs",
-            $"{Slice}/CreateInvoiceResponse.cs",
+            $"{Slice}/Contracts/CreateInvoiceResponse.cs",
             $"{Slice}/CreateInvoiceValidator.cs",
             $"{Slice}/CreateInvoiceHandler.cs",
             $"{Slice}/CreateInvoiceMappings.cs",

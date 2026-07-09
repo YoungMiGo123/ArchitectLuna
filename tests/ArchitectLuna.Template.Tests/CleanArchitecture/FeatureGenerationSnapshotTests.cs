@@ -4,10 +4,12 @@ using Xunit;
 namespace ArchitectLuna.Template.Tests.CleanArchitecture;
 
 /// <summary>
-/// docs/requirements/002-testing-layer.md §Clean Architecture Template Tests: generated code is
-/// placed into the correct projects/layers — entities in Domain, handlers/validators/mappings in
-/// Application, Request/Response DTOs in Contracts, endpoints in Api, persistence in
-/// Infrastructure — and layer leaks are rejected.
+/// docs/requirements/002-testing-layer.md §Clean Architecture Template Tests, updated per
+/// docs/requirements/003-improvements.md §2.2-2.3: generated code is placed into the correct
+/// projects/layers — entities in Domain, handlers/validators/mappings in Application,
+/// Request/Response DTOs in a `Contracts/` subfolder of each Application feature slice (not a
+/// separate project), endpoints in Api, persistence in Infrastructure — and layer leaks are
+/// rejected.
 /// </summary>
 public sealed class FeatureGenerationSnapshotTests
 {
@@ -15,7 +17,6 @@ public sealed class FeatureGenerationSnapshotTests
     private const string Application = "src/BillingService.Application";
     private const string Domain = "src/BillingService.Domain";
     private const string Infrastructure = "src/BillingService.Infrastructure";
-    private const string Contracts = "src/BillingService.Contracts";
 
     [Theory]
     [InlineData("mediatr")]
@@ -36,9 +37,9 @@ public sealed class FeatureGenerationSnapshotTests
         Assert.Contains($"{Application}/Features/Invoices/CreateInvoice/CreateInvoiceHandler.cs", paths);
         Assert.Contains($"{Application}/Features/Invoices/CreateInvoice/CreateInvoiceMappings.cs", paths);
 
-        // Contracts owns the public DTOs.
-        Assert.Contains($"{Contracts}/Features/Invoices/CreateInvoice/CreateInvoiceRequest.cs", paths);
-        Assert.Contains($"{Contracts}/Features/Invoices/CreateInvoice/CreateInvoiceResponse.cs", paths);
+        // Contracts is a subfolder of the owning Application slice, not a separate project.
+        Assert.Contains($"{Application}/Features/Invoices/CreateInvoice/Contracts/CreateInvoiceRequest.cs", paths);
+        Assert.Contains($"{Application}/Features/Invoices/CreateInvoice/Contracts/CreateInvoiceResponse.cs", paths);
 
         // Api owns the HTTP endpoint.
         Assert.Contains($"{Api}/Features/Invoices/CreateInvoice/CreateInvoiceEndpoint.cs", paths);
@@ -114,7 +115,7 @@ public sealed class FeatureGenerationSnapshotTests
             GenerationTestHarness.CleanArchitectureContext(), adapter, "efcore-postgres", GenerationTestHarness.InvoiceFeature());
         var mappings = GenerationTestHarness.ContentOf(files, $"{Application}/Features/Invoices/CreateInvoice/CreateInvoiceMappings.cs");
 
-        Assert.Contains("using BillingService.Contracts.Features.Invoices.CreateInvoice;", mappings);
+        Assert.Contains("using BillingService.Application.Features.Invoices.CreateInvoice.Contracts;", mappings);
         Assert.Contains("ToCommand(this CreateInvoiceRequest request)", mappings);
         Assert.Contains("ToResponse(this CreateInvoiceResult result)", mappings);
     }
