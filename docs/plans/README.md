@@ -13,3 +13,4 @@ delete completed plans — they are the design history of the project.
 |---|---|---|
 | 001 | [Production foundation + testing layer](001-production-foundation-and-testing-layer.md) | Done |
 | 002 | [Pagination for generated GetAll queries](002-crud-getall-pagination.md) | Implemented, verification pending |
+| 003 | [Generation quality, entity sync, and database readiness](003-generation-quality-and-db-readiness.md) | In progress |
