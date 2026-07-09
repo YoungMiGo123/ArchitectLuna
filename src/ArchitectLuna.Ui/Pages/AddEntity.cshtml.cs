@@ -1,3 +1,4 @@
+using ArchitectLuna.Core.Editing;
 using ArchitectLuna.Core.Model;
 using ArchitectLuna.Core.Validation;
 using ArchitectLuna.Core.Yaml;
@@ -8,10 +9,9 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 namespace ArchitectLuna.Ui.Pages;
 
 /// <summary>
-/// Replicates the same "entity outwards" logic as the CLI's AddEntityCommand
-/// (src/ArchitectLuna.Cli/Commands/AddEntityCommand.cs) directly against ArchitectLuna.Core -
-/// ModelSerializer.Load/Save, CrudSynthesizer.SynthesizeCrud, ModelValidator.Validate - rather
-/// than shelling out to the CLI, since Core is meant to be consumed directly by a UI.
+/// Uses the same "entity outwards" logic as the CLI's AddEntityCommand — both are thin
+/// presenters over ArchitectLuna.Core's ModelEditor, which owns the ordering/duplicate rules —
+/// rather than shelling out to the CLI, since Core is meant to be consumed directly by a UI.
 /// One difference from the CLI command: if the chosen feature doesn't exist yet, this page
 /// creates it instead of requiring a separate "add feature" step first, since the form only
 /// offers one combined "feature" input.
@@ -87,35 +87,20 @@ public sealed class AddEntityModel : PageModel
 
         var model = loaded;
 
-        var feature = model.Features.FirstOrDefault(f => f.Name == FeatureName);
-        if (feature is null)
+        // The form only offers one combined "feature" input, so a missing feature is created
+        // here instead of failing like the CLI's stricter two-step flow does.
+        if (model.Features.All(f => f.Name != FeatureName))
         {
-            feature = new FeatureModel { Name = FeatureName };
-            model.Features.Add(feature);
-        }
-
-        if (feature.Entities.Any(e => e.Name == EntityName))
-        {
-            ErrorMessage = $"Entity '{EntityName}' already exists in feature '{FeatureName}'.";
-            return;
+            ModelEditor.AddFeature(model, FeatureName);
         }
 
         var entity = new EntityModel { Name = EntityName, Fields = fields };
-        var (commands, queries) = CrudSynthesizer.SynthesizeCrud(entity);
-
-        var collisions = commands.Select(c => c.Name).Where(n => feature.Commands.Any(c => c.Name == n))
-            .Concat(queries.Select(q => q.Name).Where(n => feature.Queries.Any(q => q.Name == n)))
-            .ToList();
-
-        if (collisions.Count > 0)
+        var editResult = ModelEditor.AddEntity(model, FeatureName, entity);
+        if (!editResult.Success)
         {
-            ErrorMessage = $"Cannot add entity '{EntityName}': it would generate command/query names that already exist in feature '{FeatureName}': {string.Join(", ", collisions)}.";
+            ErrorMessage = editResult.Error;
             return;
         }
-
-        feature.Entities.Add(entity);
-        feature.Commands.AddRange(commands);
-        feature.Queries.AddRange(queries);
 
         var validation = ModelValidator.Validate(model);
         if (!validation.IsValid)
@@ -128,7 +113,7 @@ public sealed class AddEntityModel : PageModel
         ModelSerializer.Save(modelPath, model);
 
         SuccessMessage = $"Added entity '{EntityName}' to feature '{FeatureName}' with full CRUD: " +
-                          string.Join(", ", commands.Select(c => c.Name).Concat(queries.Select(q => q.Name))) + ".";
+                          string.Join(", ", editResult.AddedOperations) + ".";
 
         // Reload so the page reflects the freshly-saved state and the form resets.
         LoadedModel = model;
