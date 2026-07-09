@@ -11,7 +11,7 @@ namespace ArchitectLuna.Core.Generation;
 /// </summary>
 public interface IPersistenceGenerator
 {
-    /// <summary>Provider key as used in the --persistence CLI flag ("none", "efcore-postgres", "efcore-sqlserver", "marten").</summary>
+    /// <summary>Provider key as used in the --persistence CLI flag ("none", "in-memory", "efcore-postgres", "efcore-sqlserver", "marten").</summary>
     string Name { get; }
 
     /// <summary>NuGet package IDs the generated API project must reference for this provider to compile.</summary>

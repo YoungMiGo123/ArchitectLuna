@@ -15,7 +15,7 @@
     <PackageId>architect-luna</PackageId>
     <Version>0.1.0</Version>
     <Authors>ArchitectLuna contributors</Authors>
-    <Description>CLI code generator for .NET APIs — entity-driven CRUD scaffolding with pluggable messaging (MediatR/Wolverine) and persistence (EF Core/Marten) backends.</Description>
+    <Description>CLI code generator for .NET APIs — entity-driven CRUD scaffolding with pluggable messaging (MediatR/Wolverine) and persistence (in-memory/EF Core/Marten) backends.</Description>
     <PackageTags>codegen;scaffolding;cli;dotnet-tool;mediatr;wolverine;efcore;marten</PackageTags>
     <RepositoryUrl>https://github.com/YoungMiGo123/ArchitectLuna</RepositoryUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -34,6 +34,7 @@
     <ProjectReference Include="../ArchitectLuna.Templates/ArchitectLuna.Templates.csproj" />
     <ProjectReference Include="../ArchitectLuna.Adapters.MediatR/ArchitectLuna.Adapters.MediatR.csproj" />
     <ProjectReference Include="../ArchitectLuna.Adapters.Wolverine/ArchitectLuna.Adapters.Wolverine.csproj" />
+    <ProjectReference Include="../ArchitectLuna.Persistence.InMemory/ArchitectLuna.Persistence.InMemory.csproj" />
     <ProjectReference Include="../ArchitectLuna.Persistence.EfCore/ArchitectLuna.Persistence.EfCore.csproj" />
     <ProjectReference Include="../ArchitectLuna.Persistence.Marten/ArchitectLuna.Persistence.Marten.csproj" />
   </ItemGroup>

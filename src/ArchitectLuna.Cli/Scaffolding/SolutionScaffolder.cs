@@ -14,7 +14,7 @@ namespace ArchitectLuna.Cli.Scaffolding;
 /// </summary>
 public static class SolutionScaffolder
 {
-    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "none")
+    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "in-memory")
     {
         var root = Path.Combine(parentDirectory, solutionName);
         if (Directory.Exists(root))
@@ -41,7 +41,7 @@ public static class SolutionScaffolder
         Directory.CreateDirectory(commonDir);
         File.WriteAllText(Path.Combine(commonDir, "IEndpointDefinition.cs"), BuildEndpointDefinitionInterface(solutionName));
 
-        if (persistenceProvider != PersistenceProvider.None)
+        if (persistenceProvider is not PersistenceProvider.None and not PersistenceProvider.InMemory)
         {
             File.WriteAllText(Path.Combine(apiProjectDir, "appsettings.json"), BuildAppSettings(solutionName, persistenceProvider));
         }

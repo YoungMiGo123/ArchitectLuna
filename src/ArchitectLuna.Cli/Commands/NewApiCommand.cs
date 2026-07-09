@@ -17,9 +17,9 @@ public sealed class NewApiCommandSettings : CommandSettings
     public string Adapter { get; init; } = "mediatr";
 
     [CommandOption("--persistence")]
-    [Description("Persistence provider: none, efcore-postgres, efcore-sqlserver, or marten.")]
-    [DefaultValue("none")]
-    public string Persistence { get; init; } = "none";
+    [Description("Persistence provider: in-memory (default), none, efcore-postgres, efcore-sqlserver, or marten.")]
+    [DefaultValue("in-memory")]
+    public string Persistence { get; init; } = "in-memory";
 }
 
 public sealed class NewApiCommand : Command<NewApiCommandSettings>

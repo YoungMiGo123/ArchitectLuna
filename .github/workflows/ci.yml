@@ -47,7 +47,7 @@ jobs:
       fail-fast: false
       matrix:
         adapter: [mediatr, wolverine]
-        persistence: [none, efcore-postgres, efcore-sqlserver, marten]
+        persistence: [none, in-memory, efcore-postgres, efcore-sqlserver, marten]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

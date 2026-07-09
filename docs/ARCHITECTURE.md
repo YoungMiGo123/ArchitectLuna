@@ -44,9 +44,11 @@
    configured `IPersistenceGenerator` (`ArchitectLuna.Core/Generation/IPersistenceGenerator.cs`)
    for a `HandlerBinding`: the body statements plus at most one dependency to inject (a DbContext,
    an `IDocumentSession`, etc — see `HandlerBinding.cs`'s doc comment for why it's capped at one).
-   `NullPersistenceGenerator` (the `--persistence none` default) returns the original
-   `throw new NotImplementedException();` placeholder unchanged, so this is fully backward
-   compatible. A provider also gets two file-generation hooks: `GenerateEntityPersistence`
+   `NullPersistenceGenerator` (selected by `--persistence none`) returns the original
+   `throw new NotImplementedException();` placeholder unchanged, so that choice stays fully
+   backward compatible; `new api` defaults to `--persistence in-memory` instead, so a freshly
+   scaffolded solution has real handler bodies out of the box. A provider also gets two
+   file-generation hooks: `GenerateEntityPersistence`
    (once per entity — a domain class, an EF `IEntityTypeConfiguration<T>`, etc.) and
    `GenerateSolutionPersistence` (once per `generate` run, given every entity across every
    feature — for a DbContext that needs one `DbSet<T>` per entity; providers with nothing
@@ -62,7 +64,7 @@
 | `ArchitectLuna.Core` | Intent Model, naming/route inference, validation, protected-region merge, manifest, `IFrameworkAdapter`/`IPersistenceGenerator` contracts. No knowledge of MediatR/Wolverine/EF Core/Marten/Scriban. |
 | `ArchitectLuna.Templates` | Scriban engine wrapper + embedded `.sbn` templates. No knowledge of the CLI or the Intent Model's YAML shape. |
 | `ArchitectLuna.Adapters.MediatR` / `ArchitectLuna.Adapters.Wolverine` | Implement `IFrameworkAdapter`; each depends only on `Core` and `Templates`, not on each other, so a third-party adapter can be added the same way without touching existing ones. |
-| `ArchitectLuna.Persistence.EfCore` / `ArchitectLuna.Persistence.Marten` | Implement `IPersistenceGenerator`; same independence property as the messaging adapters — a provider only ever adds new files, it never needs to modify another provider or adapter. |
+| `ArchitectLuna.Persistence.InMemory` / `ArchitectLuna.Persistence.EfCore` / `ArchitectLuna.Persistence.Marten` | Implement `IPersistenceGenerator`; same independence property as the messaging adapters — a provider only ever adds new files, it never needs to modify another provider or adapter. InMemory is the `new api` default: zero NuGet packages, zero external process, real CRUD backed by a generated in-process store. |
 | `ArchitectLuna.Ui` | Razor Pages app built directly on `Core` (no CLI dependency for model reads/writes, confirming Core's zero-console-I/O boundary is real) plus a runtime-only shell-out to the built CLI for `generate`. |
 | `ArchitectLuna.Cli` | Spectre.Console.Cli entry point (`new`, `add feature/entity/command/query`, `generate`) plus `SolutionScaffolder`, which shells out to the real `dotnet` CLI for `.sln`/project creation and package references so version resolution always comes from the live NuGet feed. `AdapterRegistry`/`PersistenceRegistry` resolve `--adapter`/`--persistence` strings to concrete implementations — this is the one place that knows about every adapter and provider by name. |
 

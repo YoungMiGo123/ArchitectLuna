@@ -27,6 +27,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ArchitectLuna.Ui", "src\Arc
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ArchitectLuna.EndToEnd.Tests", "tests\ArchitectLuna.EndToEnd.Tests\ArchitectLuna.EndToEnd.Tests.csproj", "{45189F1A-1176-4DDF-95B4-67E87C96DEFB}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ArchitectLuna.Persistence.InMemory", "src\ArchitectLuna.Persistence.InMemory\ArchitectLuna.Persistence.InMemory.csproj", "{E9359856-3C63-406C-8DB6-215979C5356B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -157,6 +159,18 @@ Global
 		{45189F1A-1176-4DDF-95B4-67E87C96DEFB}.Release|x64.Build.0 = Release|Any CPU
 		{45189F1A-1176-4DDF-95B4-67E87C96DEFB}.Release|x86.ActiveCfg = Release|Any CPU
 		{45189F1A-1176-4DDF-95B4-67E87C96DEFB}.Release|x86.Build.0 = Release|Any CPU
+		{E9359856-3C63-406C-8DB6-215979C5356B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E9359856-3C63-406C-8DB6-215979C5356B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E9359856-3C63-406C-8DB6-215979C5356B}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E9359856-3C63-406C-8DB6-215979C5356B}.Debug|x64.Build.0 = Debug|Any CPU
+		{E9359856-3C63-406C-8DB6-215979C5356B}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E9359856-3C63-406C-8DB6-215979C5356B}.Debug|x86.Build.0 = Debug|Any CPU
+		{E9359856-3C63-406C-8DB6-215979C5356B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E9359856-3C63-406C-8DB6-215979C5356B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E9359856-3C63-406C-8DB6-215979C5356B}.Release|x64.ActiveCfg = Release|Any CPU
+		{E9359856-3C63-406C-8DB6-215979C5356B}.Release|x64.Build.0 = Release|Any CPU
+		{E9359856-3C63-406C-8DB6-215979C5356B}.Release|x86.ActiveCfg = Release|Any CPU
+		{E9359856-3C63-406C-8DB6-215979C5356B}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -172,5 +186,6 @@ Global
 		{4406AC31-F45A-4604-9C58-0061659F3A0C} = {13B7B602-637C-4A8F-91BE-0EC9B753C163}
 		{85FEE40B-0FA3-45E3-B189-FB0ABF3B83C4} = {13B7B602-637C-4A8F-91BE-0EC9B753C163}
 		{45189F1A-1176-4DDF-95B4-67E87C96DEFB} = {896C864F-A2C4-4C9A-BF88-11380206FE3E}
+		{E9359856-3C63-406C-8DB6-215979C5356B} = {13B7B602-637C-4A8F-91BE-0EC9B753C163}
 	EndGlobalSection
 EndGlobal

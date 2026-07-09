@@ -36,8 +36,23 @@
   `PackAsTool`/`ToolCommandName`/`PackageId`/`Version`/`PackageReadmeFile` set; `dotnet pack` +
   `dotnet tool install --global --add-source ./nupkg architect-luna` verified end to end — bare
   `architect-luna` command, run from an arbitrary directory, scaffolds and generates a real
-  buildable solution. See README's "Installing" section. Publishing to a real feed (GitHub
-  Packages / NuGet.org) for install-without-a-checkout is a natural next step, not yet done.
+  buildable solution. See README's "Installing" section (now also documents publishing to GitHub
+  Packages/NuGet.org so teammates/CI can install without a checkout — the actual `dotnet nuget
+  push` still hasn't been run against a real feed, so "verified end to end" only covers the local
+  `--add-source ./nupkg` path).
+- **A zero-setup `in-memory` persistence provider, made the `new api` default.**
+  `ArchitectLuna.Persistence.InMemory` (`InMemoryPersistenceGenerator`) implements
+  `IPersistenceGenerator` exactly like EF Core/Marten, but needs no NuGet package and no external
+  process: one generated `InMemoryStore` (a `ConcurrentDictionary` keyed by entity type + id,
+  registered as a DI singleton) backs every entity's Create/Update/Delete/GetById/GetAll. This
+  closes the gap where a freshly scaffolded solution's handlers all threw
+  `NotImplementedException` unless you separately stood up Postgres/SQL Server — now `new api`
+  with no flags produces a solution that builds *and* serves real CRUD immediately (verified by
+  running the generated API and curling Create/GetById/GetAll/Update/Delete against it, not just
+  `dotnet build`). `--persistence none` still exists as an explicit opt-out for
+  placeholder-only handlers. Covered by `ArchitectLuna.EndToEnd.Tests` and the CI smoke matrix
+  for both adapters; that same pass also added the previously-missing `marten` cases to
+  `GeneratedSolutionBuildTests` (it was in the CI smoke matrix but absent from the xUnit suite).
 
 ## Near-term — get to a demoable prototype
 
@@ -48,7 +63,8 @@
   proof that `IFrameworkAdapter` is a real seam, not just a naming convention.
 - **EF Core migrations.** `dotnet ef migrations add`/`database update` wired into `new api`/
   `generate` (or documented as a manual follow-up step) — right now a generated `DbContext`
-  compiles but nothing creates the schema.
+  compiles but nothing creates the schema. (The new `in-memory` default sidesteps this for a
+  first run, but `efcore-postgres`/`efcore-sqlserver` still need it before they're runnable.)
 - **UI: `--rule` support in the add-entity form.** The CLI's `add entity --rule Field:RuleExpr`
   has no UI equivalent yet (self-disclosed gap from the UI build) — only Name/Type field rows.
 

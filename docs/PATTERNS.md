@@ -113,20 +113,25 @@ sees.
 
 ## Persistence provider parity
 
-EF Core (`efcore-postgres`/`efcore-sqlserver`) and Marten (`marten`) both implement
-`IPersistenceGenerator` and both use the same message-field-in / entity-field-out naming
+In-Memory (`in-memory`), EF Core (`efcore-postgres`/`efcore-sqlserver`), and Marten (`marten`) all
+implement `IPersistenceGenerator` and all use the same message-field-in / entity-field-out naming
 convention in generated handler bodies (`message.{Field}` for input, `entity.{Field}` for output,
 `entity`/`entities` as local variable names, `KeyNotFoundException` with the same message format
-for a missing Update/GetById target) — but their storage shape differs, because the two databases
-are genuinely different:
+for a missing Update/GetById target) — but their storage shape differs:
 
-| | EF Core | Marten |
-|---|---|---|
-| Per-entity file | domain class + `IEntityTypeConfiguration<T>` | plain document class only (Marten auto-detects `Guid Id` as the document identity, no separate config needed) |
-| Solution-level file | one `DbContext` with a `DbSet<T>` per entity | none — nothing aggregates across entities |
-| Injected dependency | the generated `DbContext` | `IDocumentSession` (covers both reads and writes, since it also implements `IQuerySession`) |
-| Write | `Add`/`Remove` + `SaveChangesAsync` | `Store`/`Delete` + `SaveChangesAsync` |
-| Read | `FirstOrDefaultAsync`/`ToListAsync` (`AsNoTracking()`) | `LoadAsync`/`Query<T>().ToListAsync()` |
+| | In-Memory | EF Core | Marten |
+|---|---|---|---|
+| Per-entity file | plain POCO class only | domain class + `IEntityTypeConfiguration<T>` | plain document class only (Marten auto-detects `Guid Id` as the document identity, no separate config needed) |
+| Solution-level file | one `InMemoryStore` shared by every entity | one `DbContext` with a `DbSet<T>` per entity | none — nothing aggregates across entities |
+| Injected dependency | the generated `InMemoryStore` (registered as a singleton) | the generated `DbContext` | `IDocumentSession` (covers both reads and writes, since it also implements `IQuerySession`) |
+| Write | `Save`/`Remove` (dictionary keyed by entity type + id) | `Add`/`Remove` + `SaveChangesAsync` | `Store`/`Delete` + `SaveChangesAsync` |
+| Read | `Find`/`GetAll` | `FirstOrDefaultAsync`/`ToListAsync` (`AsNoTracking()`) | `LoadAsync`/`Query<T>().ToListAsync()` |
+| External dependency | none — no NuGet package, no connection string, no database process | Postgres or SQL Server must be reachable at runtime | Postgres (Marten is Postgres-native) must be reachable at runtime |
+| Durability | process lifetime only — reset on restart | durable | durable |
 
-Like the messaging adapters, switching `--persistence` never changes a command/query's route, only
-how its handler talks to storage.
+In-Memory is the `new api` default specifically because it has no external dependency: a freshly
+scaffolded solution has real, runnable CRUD without a database to stand up first. Switching to a
+durable provider later is a `--persistence` model change, not a rewrite — the entity shape and
+handler call sites look the same, only the injected dependency and its backing store differ. Like
+the messaging adapters, switching `--persistence` never changes a command/query's route, only how
+its handler talks to storage.
