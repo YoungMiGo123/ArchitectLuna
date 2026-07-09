@@ -7,18 +7,20 @@ namespace ArchitectLuna.Persistence.Marten;
 /// <summary>
 /// Marten persistence for entity-backed CRUD handlers. Marten is a Postgres-native document
 /// database, so there is no separate mapping/configuration step and no DbContext-equivalent
-/// aggregate file — each entity is just a plain POCO document class with a Guid "Id" property,
-/// which Marten auto-detects as the document identity. Document classes go under
-/// <see cref="GenerationContext.Domain"/>/Documents; for vertical slice that's a "Persistence"
-/// subfolder of the API project (byte-identical to pre-multi-root output), for Clean Architecture
-/// it's the Domain project itself.
+/// aggregate file — each entity is just a document class (inheriting the scaffolded
+/// <c>BaseEntity</c>, whose Guid "Id" property Marten auto-detects as the document identity).
+/// Document classes go under <see cref="GenerationContext.Domain"/>/Documents; for vertical slice
+/// that's a "Persistence" subfolder of the API project (byte-identical to pre-multi-root output),
+/// for Clean Architecture it's the Domain project itself.
 ///
 /// Handler bodies get an <c>IDocumentSession</c> injected (MediatR via constructor, Wolverine via
-/// an extra static-method parameter) and do straightforward Store/Load/Delete/Query calls — no
-/// repository layer, matching the tool's "simplistic" generated-code philosophy. IDocumentSession
-/// also implements IQuerySession, so the same single dependency covers both commands and queries.
-/// It's already an interface owned by Marten, so unlike EF Core's DbContext there's no need to
-/// generate an abstraction for Clean Architecture's Application→Infrastructure dependency rule.
+/// an extra static-method parameter), do straightforward Store/Load/Delete/Query calls — no
+/// repository layer, matching the tool's "simplistic" generated-code philosophy — and return
+/// <c>Result&lt;T&gt;</c> outcomes (NotFound as an explicit failure, never an exception for a
+/// normal business outcome). IDocumentSession also implements IQuerySession, so the same single
+/// dependency covers both commands and queries. It's already an interface owned by Marten, so
+/// unlike EF Core's DbContext there's no need to generate an abstraction for Clean Architecture's
+/// Application→Infrastructure dependency rule.
 /// </summary>
 public sealed class MartenPersistenceGenerator : IPersistenceGenerator
 {
@@ -31,7 +33,7 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
     // separate "abstractions-only" package the way EF Core does.
     public IReadOnlyList<string> ApplicationRequiredPackages { get; } = new[] { "Marten" };
 
-    public IReadOnlyList<string> ProgramCsUsings { get; } = new[] { "Marten" };
+    public IReadOnlyList<string> ServiceRegistrationUsings { get; } = new[] { "Marten" };
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
     {
@@ -68,16 +70,17 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         return new HandlerBinding(body, "IDocumentSession", "session", HandlerUsings(context));
     }
 
-    public IReadOnlyList<string> BuildProgramCsRegistration(GenerationContext context)
+    public IReadOnlyList<string> BuildServiceRegistration(GenerationContext context)
     {
         return new[]
         {
-            "builder.Services.AddMarten(options => options.Connection(builder.Configuration.GetConnectionString(\"Default\")!));",
+            "services.AddMarten(options => options.Connection(configuration.GetConnectionString(\"Default\")!));",
         };
     }
 
     private static List<string> HandlerUsings(GenerationContext context) => new()
     {
+        $"{context.Application.RootNamespace}.Common.Results",
         $"{context.Domain.RootNamespace}.Documents",
         "Marten",
     };
@@ -85,13 +88,21 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
     private static string RenderDocumentClass(GenerationContext context, EntityModel entity)
     {
         var sb = new StringBuilder();
+        sb.AppendLine($"using {context.Domain.RootNamespace}.Common;");
+        sb.AppendLine();
         sb.AppendLine($"namespace {context.Domain.RootNamespace}.Documents;");
         sb.AppendLine();
-        sb.AppendLine($"public sealed class {entity.Name}");
+        sb.AppendLine($"public sealed class {entity.Name} : BaseEntity");
         sb.AppendLine("{");
-        sb.AppendLine("    public Guid Id { get; set; }");
+        var first = true;
         foreach (var field in entity.Fields)
         {
+            if (!first)
+            {
+                sb.AppendLine();
+            }
+
+            first = false;
             sb.AppendLine($"    public {field.Type} {field.Name} {{ get; set; }}{DefaultInitializer(field.Type)}");
         }
 
@@ -115,15 +126,19 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         sb.AppendLine("};");
         sb.AppendLine("session.Store(entity);");
         sb.AppendLine("await session.SaveChangesAsync(cancellationToken);");
-        sb.Append($"return new {resultName}(entity.Id);");
+        sb.Append($"return Result<{resultName}>.Success(new {resultName}(entity.Id));");
         return sb.ToString();
     }
 
     private static string RenderUpdateBody(EntityModel entity, string resultName)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"var entity = await session.LoadAsync<{entity.Name}>(message.Id, cancellationToken)");
-        sb.AppendLine($"    ?? throw new KeyNotFoundException($\"{entity.Name} '{{message.Id}}' was not found.\");");
+        sb.AppendLine($"var entity = await session.LoadAsync<{entity.Name}>(message.Id, cancellationToken);");
+        sb.AppendLine("if (entity is null)");
+        sb.AppendLine("{");
+        sb.AppendLine($"    return Result<{resultName}>.Failure(Error.NotFound($\"{entity.Name} '{{message.Id}}' was not found.\"));");
+        sb.AppendLine("}");
+        sb.AppendLine();
         foreach (var field in entity.Fields)
         {
             sb.AppendLine($"entity.{field.Name} = message.{field.Name};");
@@ -131,16 +146,22 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
 
         sb.AppendLine("session.Store(entity);");
         sb.AppendLine("await session.SaveChangesAsync(cancellationToken);");
-        sb.Append($"return new {resultName}(entity.Id);");
+        sb.Append($"return Result<{resultName}>.Success(new {resultName}(entity.Id));");
         return sb.ToString();
     }
 
     private static string RenderDeleteBody(EntityModel entity, string resultName)
     {
         var sb = new StringBuilder();
+        sb.AppendLine($"var entity = await session.LoadAsync<{entity.Name}>(message.Id, cancellationToken);");
+        sb.AppendLine("if (entity is null)");
+        sb.AppendLine("{");
+        sb.AppendLine($"    return Result<{resultName}>.Failure(Error.NotFound($\"{entity.Name} '{{message.Id}}' was not found.\"));");
+        sb.AppendLine("}");
+        sb.AppendLine();
         sb.AppendLine($"session.Delete<{entity.Name}>(message.Id);");
         sb.AppendLine("await session.SaveChangesAsync(cancellationToken);");
-        sb.Append($"return new {resultName}(message.Id);");
+        sb.Append($"return Result<{resultName}>.Success(new {resultName}(message.Id));");
         return sb.ToString();
     }
 
@@ -148,9 +169,13 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
     {
         var args = string.Join(", ", new[] { "entity.Id" }.Concat(entity.Fields.Select(f => $"entity.{f.Name}")));
         var sb = new StringBuilder();
-        sb.AppendLine($"var entity = await session.LoadAsync<{entity.Name}>(message.Id, cancellationToken)");
-        sb.AppendLine($"    ?? throw new KeyNotFoundException($\"{entity.Name} '{{message.Id}}' was not found.\");");
-        sb.Append($"return new {resultName}({args});");
+        sb.AppendLine($"var entity = await session.LoadAsync<{entity.Name}>(message.Id, cancellationToken);");
+        sb.AppendLine("if (entity is null)");
+        sb.AppendLine("{");
+        sb.AppendLine($"    return Result<{resultName}>.Failure(Error.NotFound($\"{entity.Name} '{{message.Id}}' was not found.\"));");
+        sb.AppendLine("}");
+        sb.AppendLine();
+        sb.Append($"return Result<{resultName}>.Success(new {resultName}({args}));");
         return sb.ToString();
     }
 
@@ -159,7 +184,7 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         var args = string.Join(", ", new[] { "entity.Id" }.Concat(entity.Fields.Select(f => $"entity.{f.Name}")));
         var sb = new StringBuilder();
         sb.AppendLine($"var entities = await session.Query<{entity.Name}>().ToListAsync(cancellationToken);");
-        sb.Append($"return entities.Select(entity => new {resultName}({args})).ToList();");
+        sb.Append($"return Result<IReadOnlyList<{resultName}>>.Success(entities.Select(entity => new {resultName}({args})).ToList());");
         return sb.ToString();
     }
 }

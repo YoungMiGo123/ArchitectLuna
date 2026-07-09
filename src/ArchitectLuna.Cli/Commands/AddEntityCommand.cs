@@ -1,6 +1,6 @@
 using ArchitectLuna.Cli.Parsing;
+using ArchitectLuna.Core.Editing;
 using ArchitectLuna.Core.Model;
-using ArchitectLuna.Core.Workspace;
 using ArchitectLuna.Core.Yaml;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -26,27 +26,19 @@ public sealed class AddEntityCommandSettings : CommandSettings
 /// An entity is the source of truth for a feature's domain data — everything downstream
 /// (commands, queries, handlers, validators, endpoints) is generated outward from it via
 /// <see cref="CrudSynthesizer"/>, giving a full Create/Read/Update/Delete/List slice from one call.
+/// Ordering and duplicate rules live in <see cref="ModelEditor"/>; this command only parses input
+/// and presents outcomes.
 /// </summary>
 public sealed class AddEntityCommand : Command<AddEntityCommandSettings>
 {
     protected override int Execute(CommandContext context, AddEntityCommandSettings settings, CancellationToken cancellationToken)
     {
-        var root = WorkspaceLocator.Locate(Directory.GetCurrentDirectory());
-        var modelPath = Path.Combine(root, ".architect", "model.yaml");
+        if (!WorkspaceGuard.TryLocateModelPath(out var modelPath))
+        {
+            return 1;
+        }
+
         var model = ModelSerializer.Load(modelPath);
-
-        var feature = model.Features.FirstOrDefault(f => f.Name == settings.Feature);
-        if (feature is null)
-        {
-            AnsiConsole.MarkupLineInterpolated($"[red]Feature '{settings.Feature}' does not exist. Run 'add feature {settings.Feature}' first.[/]");
-            return 1;
-        }
-
-        if (feature.Entities.Any(e => e.Name == settings.Name))
-        {
-            AnsiConsole.MarkupLineInterpolated($"[red]Entity '{settings.Name}' already exists in feature '{settings.Feature}'.[/]");
-            return 1;
-        }
 
         var fields = settings.Fields.Select(SpecParser.ParseField).ToList();
 
@@ -64,24 +56,15 @@ public sealed class AddEntityCommand : Command<AddEntityCommandSettings>
         }
 
         var entity = new EntityModel { Name = settings.Name, Fields = fields };
-        var (commands, queries) = CrudSynthesizer.SynthesizeCrud(entity);
-
-        var collisions = commands.Select(c => c.Name).Where(n => feature.Commands.Any(c => c.Name == n))
-            .Concat(queries.Select(q => q.Name).Where(n => feature.Queries.Any(q => q.Name == n)))
-            .ToList();
-
-        if (collisions.Count > 0)
+        var result = ModelEditor.AddEntity(model, settings.Feature, entity);
+        if (!result.Success)
         {
-            AnsiConsole.MarkupLineInterpolated($"[red]Cannot add entity '{settings.Name}': it would generate command/query names that already exist in feature '{settings.Feature}': {string.Join(", ", collisions)}.[/]");
+            AnsiConsole.MarkupLineInterpolated($"[red]{result.Error}[/]");
             return 1;
         }
 
-        feature.Entities.Add(entity);
-        feature.Commands.AddRange(commands);
-        feature.Queries.AddRange(queries);
         ModelSerializer.Save(modelPath, model);
-
-        AnsiConsole.MarkupLineInterpolated($"[green]Added entity '{settings.Name}' to feature '{settings.Feature}' with full CRUD: {string.Join(", ", commands.Select(c => c.Name).Concat(queries.Select(q => q.Name)))}.[/]");
+        AnsiConsole.MarkupLineInterpolated($"[green]Added entity '{settings.Name}' to feature '{settings.Feature}' with full CRUD: {string.Join(", ", result.AddedOperations)}.[/]");
         return 0;
     }
 }

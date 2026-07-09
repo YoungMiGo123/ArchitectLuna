@@ -49,4 +49,19 @@ public sealed class QueryEndpointRenderModel
 
     /// <summary>Full await-able dispatch expression, e.g. "sender.Send(query, cancellationToken)".</summary>
     public required string DispatchCall { get; init; }
+
+    /// <summary>Where the Result pattern types live — the dispatch expression can name Result&lt;T&gt; explicitly (Wolverine's InvokeAsync).</summary>
+    public required string ResultsNamespace { get; init; }
+
+    /// <summary>Where the Response DTO lives (the Contracts target's slice namespace).</summary>
+    public string? ContractsNamespace { get; init; }
+
+    /// <summary>True when the endpoint references the Response type from a different namespace (Clean Architecture Contracts project).</summary>
+    public required bool HasContractsUsing { get; init; }
+
+    /// <summary>
+    /// The expression returned when the dispatched Result succeeds — precomputed per query shape
+    /// (single item vs collection mapping) so the template stays dumb.
+    /// </summary>
+    public required string SuccessExpression { get; init; }
 }

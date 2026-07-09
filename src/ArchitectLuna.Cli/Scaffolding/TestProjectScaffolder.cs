@@ -3,8 +3,9 @@ namespace ArchitectLuna.Cli.Scaffolding;
 /// <summary>
 /// Scaffolds the xUnit test project(s) every generated solution ships with — never left as a
 /// "mission for later". Vertical slice gets one project (Api.Tests, since there's only one source
-/// project to test); Clean Architecture gets two (Application.Tests for handler/validator unit
-/// tests, Api.Tests for endpoint-level integration tests via WebApplicationFactory).
+/// project to test); Clean Architecture gets three (Application.Tests for handler/validator unit
+/// tests, Infrastructure.Tests for technical implementations, Api.Tests for endpoint-level
+/// integration tests via WebApplicationFactory).
 /// </summary>
 public static class TestProjectScaffolder
 {
@@ -38,6 +39,24 @@ public static class TestProjectScaffolder
         File.WriteAllText(Path.Combine(projectDir, "SmokeTests.cs"), BuildApplicationSmokeTests(solutionName));
 
         SolutionScaffolder.RunDotnet(root, "sln", "add", Path.Combine("tests", $"{solutionName}.Application.Tests", $"{solutionName}.Application.Tests.csproj"));
+        foreach (var package in new[] { "Microsoft.NET.Test.Sdk", "xunit", "xunit.runner.visualstudio" })
+        {
+            SolutionScaffolder.RunDotnet(root, "add", csprojPath, "package", package);
+        }
+    }
+
+    public static void CreateInfrastructureTests(string root, string solutionName, string infrastructureCsprojRelativePath)
+    {
+        var projectDir = Path.Combine(root, "tests", $"{solutionName}.Infrastructure.Tests");
+        Directory.CreateDirectory(projectDir);
+
+        var csprojPath = Path.Combine(projectDir, $"{solutionName}.Infrastructure.Tests.csproj");
+        var reference = RelativePosix(Path.Combine(root, infrastructureCsprojRelativePath), projectDir);
+        File.WriteAllText(csprojPath, ProjectFiles.TestProject(new[] { reference }));
+
+        File.WriteAllText(Path.Combine(projectDir, "SystemDateTimeProviderTests.cs"), BuildInfrastructureSmokeTests(solutionName));
+
+        SolutionScaffolder.RunDotnet(root, "sln", "add", Path.Combine("tests", $"{solutionName}.Infrastructure.Tests", $"{solutionName}.Infrastructure.Tests.csproj"));
         foreach (var package in new[] { "Microsoft.NET.Test.Sdk", "xunit", "xunit.runner.visualstudio" })
         {
             SolutionScaffolder.RunDotnet(root, "add", csprojPath, "package", package);
@@ -82,7 +101,30 @@ public static class TestProjectScaffolder
             [Fact]
             public void ApplicationAssembly_Loads()
             {
-                Assert.NotNull(typeof({{solutionName}}.Application.ApplicationAssemblyMarker));
+                Assert.NotNull(typeof({{solutionName}}.Application.ApplicationDependencyInjection));
+            }
+        }
+        """;
+
+    private static string BuildInfrastructureSmokeTests(string solutionName) =>
+        $$"""
+        using {{solutionName}}.Infrastructure.Services;
+        using Xunit;
+
+        namespace {{solutionName}}.Infrastructure.Tests;
+
+        public sealed class SystemDateTimeProviderTests
+        {
+            [Fact]
+            public void UtcNow_ReturnsCurrentUtcTime()
+            {
+                var provider = new SystemDateTimeProvider();
+
+                var before = DateTime.UtcNow;
+                var value = provider.UtcNow;
+                var after = DateTime.UtcNow;
+
+                Assert.InRange(value, before, after);
             }
         }
         """;

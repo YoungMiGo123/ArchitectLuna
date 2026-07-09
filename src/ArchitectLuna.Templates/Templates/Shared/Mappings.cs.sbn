@@ -1,0 +1,18 @@
+{{ if needs_contracts_using }}
+using {{ contracts_namespace }};
+{{ end }}
+
+namespace {{ namespace }};
+
+public static class {{ mappings_name }}
+{
+    {{ if has_request }}
+    public static {{ message_name }} ToCommand(this {{ request_name }} request{{ if request_takes_id }}, Guid id{{ end }}) =>
+        new({{ to_command_args }});
+
+    {{ end }}
+    {{ if has_response }}
+    public static {{ response_name }} ToResponse(this {{ result_name }} result) =>
+        new({{ to_response_args }});
+    {{ end }}
+}

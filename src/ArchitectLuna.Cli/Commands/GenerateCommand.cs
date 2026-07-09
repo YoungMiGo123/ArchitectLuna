@@ -18,8 +18,12 @@ public sealed class GenerateCommand : Command<GenerateCommandSettings>
 {
     protected override int Execute(CommandContext context, GenerateCommandSettings settings, CancellationToken cancellationToken)
     {
-        var root = WorkspaceLocator.Locate(Directory.GetCurrentDirectory());
-        var modelPath = Path.Combine(root, ".architect", "model.yaml");
+        if (!WorkspaceGuard.TryLocateModelPath(out var modelPath))
+        {
+            return 1;
+        }
+
+        var root = Path.GetDirectoryName(Path.GetDirectoryName(modelPath))!;
         var manifestPath = Path.Combine(root, ".architect", "manifest.json");
 
         var model = ModelSerializer.Load(modelPath);
@@ -43,7 +47,8 @@ public sealed class GenerateCommand : Command<GenerateCommandSettings>
                 $"src/{model.SolutionName}.Api",
                 $"src/{model.SolutionName}.Application",
                 $"src/{model.SolutionName}.Domain",
-                $"src/{model.SolutionName}.Infrastructure")
+                $"src/{model.SolutionName}.Infrastructure",
+                $"src/{model.SolutionName}.Contracts")
             : GenerationContext.ForVerticalSlice(model.Namespace, $"src/{model.SolutionName}.Api");
         var manifest = ManifestStore.Load(manifestPath);
 

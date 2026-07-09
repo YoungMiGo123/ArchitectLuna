@@ -8,6 +8,13 @@ public sealed class MessageRenderModel
 {
     public required string Namespace { get; init; }
 
+    /// <summary>
+    /// Where the Result pattern types live ("{Application}.Common.Results") — the message file
+    /// needs it when the record's base interface names Result&lt;T&gt; (MediatR), and the handler
+    /// signature always does.
+    /// </summary>
+    public required string ResultsNamespace { get; init; }
+
     public required string MessageName { get; init; }
 
     public required string HandlerName { get; init; }

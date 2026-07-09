@@ -1,7 +1,6 @@
 using MediatR;
+using {{ results_namespace }};
 
 namespace {{ namespace }};
 
 public sealed record {{ message_name }}({{ for field in fields }}{{ field.type }} {{ field.name }}{{ if !for.last }}, {{ end }}{{ end }}) : IRequest<{{ result_type }}>;
-
-public sealed record {{ result_name }}({{ for field in result_fields }}{{ field.type }} {{ field.name }}{{ if !for.last }}, {{ end }}{{ end }});
