@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@(ViewData["Title"] is not null ? $"{ViewData["Title"]} - " : "")ArchitectLuna</title>
+    <link rel="stylesheet" href="~/css/site.css" />
+</head>
+<body>
+    <header class="app-header">
+        <a class="brand" href="/">ArchitectLuna</a>
+        <nav>
+            <a href="/">Model</a>
+            <a href="/AddEntity@(Context.Request.Query["root"].Count > 0 ? "?root=" + Context.Request.Query["root"] : "")">Add Entity</a>
+            <a href="/Generate@(Context.Request.Query["root"].Count > 0 ? "?root=" + Context.Request.Query["root"] : "")">Generate</a>
+        </nav>
+    </header>
+    <main class="app-main">
+        @RenderBody()
+    </main>
+</body>
+</html>

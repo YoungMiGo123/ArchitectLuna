@@ -1,0 +1,125 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Model";
+}
+
+<h1>ArchitectLuna Model Viewer</h1>
+<p class="muted">Point this at a solution root directory (the one containing <code>.architect/model.yaml</code>) to browse its Intent Model.</p>
+
+<form method="get" class="inline-form">
+    <input type="text" name="Root" value="@Model.Root" placeholder="/path/to/YourSolution" size="50" />
+    <button type="submit">Load</button>
+</form>
+
+@if (Model.ErrorMessage is not null)
+{
+    <div class="error-box">@Model.ErrorMessage</div>
+}
+
+@if (Model.LoadedModel is not null)
+{
+    var m = Model.LoadedModel;
+    <div class="card">
+        <h2 style="border:none;margin:0;padding:0;">@m.SolutionName</h2>
+        <p class="muted" style="margin:0.2rem 0 0.6rem;">@Model.ResolvedRoot</p>
+        <span class="badge">namespace: @m.Namespace</span>
+        <span class="badge">adapter: @m.Adapter</span>
+        <span class="badge">persistence: @m.Persistence</span>
+        <span class="badge">schema v@m.SchemaVersion</span>
+    </div>
+
+    if (m.Features.Count == 0)
+    {
+        <p class="muted">No features yet. Use <code>architect-luna add feature &lt;name&gt;</code> or the CLI to create one.</p>
+    }
+
+    @foreach (var feature in m.Features)
+    {
+        <h2>@feature.Name</h2>
+
+        <h3>Entities</h3>
+        @if (feature.Entities.Count == 0)
+        {
+            <p class="muted">No entities.</p>
+        }
+        else
+        {
+            @foreach (var entity in feature.Entities)
+            {
+                <table>
+                    <caption style="text-align:left; caption-side:top; font-weight:600;">@entity.Name</caption>
+                    <thead><tr><th>Field</th><th>Type</th><th>Rules</th></tr></thead>
+                    <tbody>
+                    @foreach (var field in entity.Fields)
+                    {
+                        <tr>
+                            <td>@field.Name</td>
+                            <td>@field.Type</td>
+                            <td>@(field.Rules.Count == 0 ? "-" : string.Join(", ", field.Rules))</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        }
+
+        <h3>Commands</h3>
+        @if (feature.Commands.Count == 0)
+        {
+            <p class="muted">No commands.</p>
+        }
+        else
+        {
+            <table>
+                <thead><tr><th>Name</th><th>Kind</th><th>Route</th><th>Fields</th><th>Entity</th></tr></thead>
+                <tbody>
+                @foreach (var command in feature.Commands)
+                {
+                    <tr>
+                        <td>@command.Name</td>
+                        <td>@command.Kind</td>
+                        <td><code>@RouteVerb(command.Kind) @ArchitectLuna.Core.Naming.RouteInference.CommandRoute(feature, command)</code></td>
+                        <td>@string.Join(", ", command.Fields.Select(f => $"{f.Name}:{f.Type}"))</td>
+                        <td>@(command.EntityName ?? "-")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+
+        <h3>Queries</h3>
+        @if (feature.Queries.Count == 0)
+        {
+            <p class="muted">No queries.</p>
+        }
+        else
+        {
+            <table>
+                <thead><tr><th>Name</th><th>Route</th><th>Params</th><th>Result</th><th>Entity</th></tr></thead>
+                <tbody>
+                @foreach (var query in feature.Queries)
+                {
+                    <tr>
+                        <td>@query.Name</td>
+                        <td><code>GET @ArchitectLuna.Core.Naming.RouteInference.QueryRoute(feature, query)</code></td>
+                        <td>@(query.Params.Count == 0 ? "-" : string.Join(", ", query.Params.Select(p => $"{p.Name}:{p.Type}")))</td>
+                        <td>@(query.IsCollection ? "list of " : "")@string.Join(", ", query.ResultFields.Select(f => $"{f.Name}:{f.Type}"))</td>
+                        <td>@(query.EntityName ?? "-")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    }
+}
+
+@functions {
+    string RouteVerb(CommandKind kind) => kind switch
+    {
+        CommandKind.Create => "POST",
+        CommandKind.Update => "PUT",
+        CommandKind.Delete => "DELETE",
+        _ => "POST",
+    };
+}

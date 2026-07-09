@@ -1,6 +1,7 @@
 using ArchitectLuna.Core.Generation;
 using ArchitectLuna.Core.Model;
 using ArchitectLuna.Persistence.EfCore;
+using ArchitectLuna.Persistence.Marten;
 
 namespace ArchitectLuna.Cli.Adapters;
 
@@ -13,7 +14,7 @@ public static class PersistenceRegistry
         "none" => new NullPersistenceGenerator(),
         "efcore-postgres" => new EfCorePersistenceGenerator(EfCoreProviderKind.Postgres),
         "efcore-sqlserver" => new EfCorePersistenceGenerator(EfCoreProviderKind.SqlServer),
-        "marten" => throw new InvalidOperationException("The 'marten' persistence provider is not implemented yet."),
+        "marten" => new MartenPersistenceGenerator(),
         _ => throw new InvalidOperationException(
             $"Unknown --persistence value '{providerName}'. Valid values: {string.Join(", ", KnownProviders)}."),
     };
@@ -23,6 +24,7 @@ public static class PersistenceRegistry
         PersistenceProvider.None => new NullPersistenceGenerator(),
         PersistenceProvider.EfCorePostgres => new EfCorePersistenceGenerator(EfCoreProviderKind.Postgres),
         PersistenceProvider.EfCoreSqlServer => new EfCorePersistenceGenerator(EfCoreProviderKind.SqlServer),
+        PersistenceProvider.Marten => new MartenPersistenceGenerator(),
         _ => throw new InvalidOperationException($"Unknown persistence provider '{provider}'."),
     };
 
