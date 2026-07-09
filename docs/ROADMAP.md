@@ -10,24 +10,41 @@
 - **M2.5 — `IFrameworkAdapter` abstraction + Wolverine adapter.** Both adapters share route
   inference and the endpoint/validator templates; only message/handler shape and dispatch differ.
 - **M3 — Manifest + protected regions**, verified with a real hand-edit-then-regenerate round trip.
-- **M4 — Compiling end to end.** Both adapters verified by actually scaffolding, generating, and
-  `dotnet build`-ing a sample solution — not just unit tests.
+- **M4 — Compiling end to end.** Every adapter verified by actually scaffolding, generating, and
+  `dotnet build`-ing a sample solution — automated in `ArchitectLuna.EndToEnd.Tests`, not just
+  eyeballed once by hand.
 - **Entity-driven CRUD.** `add entity` synthesizes Create/Update/Delete + GetById/GetAll from one
   entity definition (`CrudSynthesizer`), with real REST verbs/routes (`POST`/`PUT /{id}`/`DELETE
   /{id}`/`GET /{id}`/`GET` collection) and GetById/GetAll returning actual entity data instead of
   echoing the lookup key.
+- **Entities → real persistence.** `IPersistenceGenerator` is the seam (`Core/Generation/
+  IPersistenceGenerator.cs`, `HandlerBinding.cs`): a messaging adapter asks the configured provider
+  for a handler's body plus one injected dependency. Three providers exist — `efcore-postgres` and
+  `efcore-sqlserver` (`ArchitectLuna.Persistence.EfCore`, one implementation parameterized by
+  provider kind: domain entity class + `IEntityTypeConfiguration<T>` per entity, one `DbContext`
+  with a `DbSet<T>` per entity) and `marten` (`ArchitectLuna.Persistence.Marten`: a plain document
+  class per entity, `IDocumentSession` Store/Load/Delete/Query, no DbContext-equivalent needed).
+  Verified for every adapter × persistence combination.
+- **CI pipeline.** `.github/workflows/ci.yml`: build+test on every push/PR (no branch filter), plus
+  a smoke-test matrix that scaffolds, generates, and builds a real solution for every
+  adapter × persistence combination.
+- **A UI layer directly over `ArchitectLuna.Core`.** `ArchitectLuna.Ui` (Razor Pages): read-only
+  model viewer, an add-entity form using Core directly (no CLI shell-out for model edits), and a
+  generate button that shells out to the built CLI. Confirms Core's zero-console-I/O boundary is
+  real, not aspirational — the UI never needed to touch `ArchitectLuna.Cli`'s own code.
 
 ## Near-term — get to a demoable prototype
 
-- **Entities → EF Core.** Generate a `DbContext`, entity configuration, and migrations from
-  `EntityModel`, and wire generated handlers to real persistence instead of
-  `throw new NotImplementedException()`. This is what turns the current scaffold-and-compile
-  prototype into something that actually stores data.
 - **`invero doctor` / `--verify`.** Run `dotnet build` after `generate` and map errors back to the
   offending `model.yaml` entry, so a bad field type or a naming collision surfaces immediately
   instead of at the next manual build.
 - **`adapter switch`.** Regenerate an existing model onto a different adapter in place — the
   proof that `IFrameworkAdapter` is a real seam, not just a naming convention.
+- **EF Core migrations.** `dotnet ef migrations add`/`database update` wired into `new api`/
+  `generate` (or documented as a manual follow-up step) — right now a generated `DbContext`
+  compiles but nothing creates the schema.
+- **UI: `--rule` support in the add-entity form.** The CLI's `add entity --rule Field:RuleExpr`
+  has no UI equivalent yet (self-disclosed gap from the UI build) — only Name/Type field rows.
 
 ## Medium-term
 
@@ -37,18 +54,14 @@
   Domain/Application/Infrastructure/Api projects, sharing the same Intent Model and adapters —
   vertical slice and Clean Architecture become two output shapes over one model, not two
   disconnected tools.
-- **A UI layer directly over `ArchitectLuna.Core`.** Core is already free of console I/O — no
-  `Console.*` calls outside `ArchitectLuna.Cli`. Keeping that boundary intact is what makes a
-  future desktop/web UI (model editing, live preview of generated files, one-click `generate`)
-  possible without a rewrite.
 - **`SchemaVersion` migration.** `ArchitectModel.SchemaVersion` exists but nothing reads it yet;
   once the YAML shape needs to change, this is what upgrades an older `model.yaml` in place.
+- **Package `architect-luna` as a real `dotnet tool`.** `ArchitectLuna.Cli.csproj` already sets
+  `PackAsTool`/`ToolCommandName`; `dotnet pack` + publish (e.g. to a private feed or NuGet.org) so
+  it installs via `dotnet tool install` instead of being run from a source checkout.
 
 ## Longer-term
 
 - **FastEndpoints adapter**, then a non-.NET adapter (NestJS or Spring) as the real test of
   whether `IFrameworkAdapter`'s language-agnostic parts of the design (route inference, CRUD
   synthesis) hold up outside .NET.
-- **CI pipeline** (build + test on PR, `dotnet pack` + publish `architect-luna` as a global tool).
-  Deliberately deferred until the near-term items above are proven, per the original build
-  handoff — no CI before the happy path is solid.

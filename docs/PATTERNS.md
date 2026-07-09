@@ -59,7 +59,7 @@ update|delete` if you want the PUT/DELETE-to-`{id}` shape without going through 
 Every generated handler wraps its body in a named marker:
 
 ```csharp
-public Task<CreateInvoiceResult> Handle(CreateInvoiceCommand request, CancellationToken cancellationToken)
+public async Task<CreateInvoiceResult> Handle(CreateInvoiceCommand message, CancellationToken cancellationToken)
 {
     // <architect:region name="handler-body">
     throw new NotImplementedException();
@@ -73,6 +73,28 @@ outside them (usings, signatures, class names) regenerates from the model. If th
 removed entirely, the file is treated as fully hand-owned and `generate` overwrites it — there is
 no partial merge without markers present.
 
+With `--persistence` set to anything but `none`, the *initial* content of that region (the first
+time a file is generated — after that it's yours, per the rule above) is real storage code instead
+of the placeholder, e.g. for `efcore-postgres`:
+
+```csharp
+public async Task<CreateInvoiceResult> Handle(CreateInvoiceCommand message, CancellationToken cancellationToken)
+{
+    // <architect:region name="handler-body">
+    var entity = new Invoice
+    {
+        Id = Guid.NewGuid(),
+        CustomerId = message.CustomerId,
+        AmountCents = message.AmountCents,
+        Currency = message.Currency,
+    };
+    dbContext.Invoices.Add(entity);
+    await dbContext.SaveChangesAsync(cancellationToken);
+    return new CreateInvoiceResult(entity.Id);
+    // </architect:region>
+}
+```
+
 ## Adapter parity
 
 MediatR and Wolverine render the *same* endpoint/validator templates (`Templates/Shared`) and the
@@ -83,7 +105,28 @@ MediatR and Wolverine render the *same* endpoint/validator templates (`Templates
 | Message | `record ... : IRequest<TResult>` | plain `record`, no marker interface |
 | Handler | `class : IRequestHandler<TMessage, TResult>` | `static class` with a `static Handle` method (Wolverine's naming-convention dispatch) |
 | Dispatcher | `ISender.Send(message, ct)` | `IMessageBus.InvokeAsync<TResult>(message, ct)` |
+| Persistence dependency injection | constructor-injected, stored in a field | extra `static Handle` method parameter (Wolverine's own convention) |
 | Endpoint HTTP mapping | minimal API via `IEndpointDefinition` | identical — **not** Wolverine.Http's `[WolverinePost]`/`[WolverineGet]` attributes |
 
 Switching `--adapter` at `new api` time changes implementation, never the HTTP contract a client
 sees.
+
+## Persistence provider parity
+
+EF Core (`efcore-postgres`/`efcore-sqlserver`) and Marten (`marten`) both implement
+`IPersistenceGenerator` and both use the same message-field-in / entity-field-out naming
+convention in generated handler bodies (`message.{Field}` for input, `entity.{Field}` for output,
+`entity`/`entities` as local variable names, `KeyNotFoundException` with the same message format
+for a missing Update/GetById target) — but their storage shape differs, because the two databases
+are genuinely different:
+
+| | EF Core | Marten |
+|---|---|---|
+| Per-entity file | domain class + `IEntityTypeConfiguration<T>` | plain document class only (Marten auto-detects `Guid Id` as the document identity, no separate config needed) |
+| Solution-level file | one `DbContext` with a `DbSet<T>` per entity | none — nothing aggregates across entities |
+| Injected dependency | the generated `DbContext` | `IDocumentSession` (covers both reads and writes, since it also implements `IQuerySession`) |
+| Write | `Add`/`Remove` + `SaveChangesAsync` | `Store`/`Delete` + `SaveChangesAsync` |
+| Read | `FirstOrDefaultAsync`/`ToListAsync` (`AsNoTracking()`) | `LoadAsync`/`Query<T>().ToListAsync()` |
+
+Like the messaging adapters, switching `--persistence` never changes a command/query's route, only
+how its handler talks to storage.
