@@ -26,14 +26,16 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
 {
     public string Name => "marten";
 
-    public IReadOnlyList<string> RequiredPackages { get; } = new[] { "Marten" };
+    // Marten covers the store; the HealthChecks abstractions are needed because — under Clean
+    // Architecture — the generated MartenHealthCheck (IHealthCheck) lives in the Infrastructure
+    // class library, which doesn't get them from the web framework. (Marten brings the hosting
+    // abstractions its own ApplyAllDatabaseChangesOnStartup hosted service needs.)
+    public IReadOnlyList<string> RequiredPackages { get; } = new[] { "Marten", "Microsoft.Extensions.Diagnostics.HealthChecks" };
 
     // Handler bodies (session.Store/Load/Query/SaveChangesAsync, IDocumentSession) live in the
     // Application project, so it needs the same single package Infrastructure does — Marten has no
     // separate "abstractions-only" package the way EF Core does.
     public IReadOnlyList<string> ApplicationRequiredPackages { get; } = new[] { "Marten" };
-
-    public IReadOnlyList<string> ServiceRegistrationUsings { get; } = new[] { "Marten" };
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
     {
@@ -42,7 +44,11 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
     }
 
     public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities) =>
-        Array.Empty<GeneratedFile>();
+        new[]
+        {
+            new GeneratedFile($"{context.Infrastructure.ProjectRoot}/MartenHealthCheck.cs", RenderMartenHealthCheck(context)),
+            new GeneratedFile($"{context.Infrastructure.ProjectRoot}/PersistenceRegistration.cs", RenderAddPersistence(context, entities)),
+        };
 
     public HandlerBinding BindCommandHandler(GenerationContext context, FeatureModel feature, EntityModel entity, CommandModel command)
     {
@@ -64,7 +70,7 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         var resultName = $"{query.Name}Result";
 
         var body = query.IsPaged
-            ? RenderPagedGetAllBody(entity, resultName)
+            ? RenderGetAllPagedBody(entity, resultName)
             : query.IsCollection
                 ? RenderGetAllBody(entity, resultName)
                 : RenderGetByIdBody(entity, resultName);
@@ -72,13 +78,88 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         return new HandlerBinding(body, "IDocumentSession", "session", HandlerUsings(context));
     }
 
-    public IReadOnlyList<string> BuildServiceRegistration(GenerationContext context)
+    private static string RenderAddPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities)
     {
-        return new[]
+        var usings = new List<string>
         {
-            "services.AddMarten(options => options.Connection(configuration.GetConnectionString(\"Default\")!));",
+            "Marten",
+            "Microsoft.Extensions.Configuration",
+            "Microsoft.Extensions.DependencyInjection",
         };
+        if (entities.Count > 0)
+        {
+            usings.Add($"{context.Domain.RootNamespace}.Documents");
+        }
+
+        var registrations = entities
+            .DistinctBy(e => e.Entity.Name)
+            .Select(e => $"            options.RegisterDocumentType<{e.Entity.Name}>();")
+            .ToList();
+        var registrationBlock = registrations.Count > 0 ? "\n" + string.Join("\n", registrations) : string.Empty;
+
+        var usingBlock = string.Join("\n", usings.Distinct().Select(u => $"using {u};"));
+
+        // RegisterDocumentType makes Marten aware of every generated document up front;
+        // ApplyAllDatabaseChangesOnStartup creates/updates each document's table at startup, so a
+        // freshly generated solution has its schema without any manual migration step.
+        return $$"""
+        {{usingBlock}}
+
+        namespace {{context.Infrastructure.RootNamespace}};
+
+        /// <summary>
+        /// Everything Marten persistence registers: the document store (with every generated
+        /// document type registered), startup schema application, and a database readiness health
+        /// check. Regenerated on every `generate` so newly added documents are registered.
+        /// </summary>
+        public static class PersistenceRegistration
+        {
+            public static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration configuration)
+            {
+                services.AddMarten(options =>
+                {
+                    options.Connection(configuration.GetConnectionString("Default")!);{{registrationBlock}}
+                }).ApplyAllDatabaseChangesOnStartup();
+
+                services.AddHealthChecks().AddCheck<MartenHealthCheck>("database", tags: new[] { "ready" });
+                return services;
+            }
+        }
+        """;
     }
+
+    private static string RenderMartenHealthCheck(GenerationContext context) =>
+        $$"""
+        using Marten;
+        using Microsoft.Extensions.Diagnostics.HealthChecks;
+
+        namespace {{context.Infrastructure.RootNamespace}};
+
+        /// <summary>Readiness check: reports Unhealthy until the Marten/Postgres store is reachable.</summary>
+        public sealed class MartenHealthCheck : IHealthCheck
+        {
+            private readonly IDocumentStore _store;
+
+            public MartenHealthCheck(IDocumentStore store)
+            {
+                _store = store;
+            }
+
+            public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+            {
+                try
+                {
+                    await using var session = _store.QuerySession();
+                    await session.QueryAsync<int>("select 1", cancellationToken);
+                    return HealthCheckResult.Healthy();
+                }
+                catch (Exception ex)
+                {
+                    return HealthCheckResult.Unhealthy("The Marten store is not reachable.", ex);
+                }
+            }
+        }
+        """;
 
     private static List<string> HandlerUsings(GenerationContext context) => new()
     {
@@ -190,15 +271,17 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         return sb.ToString();
     }
 
-    private static string RenderPagedGetAllBody(EntityModel entity, string resultName)
+    private static string RenderGetAllPagedBody(EntityModel entity, string resultName)
     {
         var args = string.Join(", ", new[] { "entity.Id" }.Concat(entity.Fields.Select(f => $"entity.{f.Name}")));
         var sb = new StringBuilder();
         sb.AppendLine("var page = message.Page <= 0 ? 1 : message.Page;");
-        sb.AppendLine("var pageSize = message.PageSize <= 0 ? 20 : message.PageSize;");
-        sb.AppendLine($"var totalCount = (long)await session.Query<{entity.Name}>().CountAsync(cancellationToken);");
+        // Capped, not just defaulted: an unbounded ?pageSize= is a resource-exhaustion vector.
+        sb.AppendLine("var pageSize = message.PageSize <= 0 ? 20 : Math.Min(message.PageSize, 100);");
+        sb.AppendLine($"var totalCount = await session.Query<{entity.Name}>().CountAsync(cancellationToken);");
         sb.AppendLine($"var entities = await session.Query<{entity.Name}>().OrderBy(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);");
-        sb.Append($"return Result<PagedResult<{resultName}>>.Success(new PagedResult<{resultName}>(entities.Select(entity => new {resultName}({args})).ToList(), page, pageSize, totalCount));");
+        sb.AppendLine($"var items = entities.Select(entity => new {resultName}({args})).ToList();");
+        sb.Append($"return Result<PagedResult<{resultName}>>.Success(new PagedResult<{resultName}>(items, page, pageSize, (long)totalCount));");
         return sb.ToString();
     }
 }

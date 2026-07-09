@@ -16,8 +16,13 @@ namespace ArchitectLuna.Cli.Scaffolding;
 /// </summary>
 public static class FoundationFiles
 {
-    /// <summary>Every foundation file for one scaffolded solution. Scaffold-time only — `generate` never rewrites these.</summary>
-    public static IReadOnlyList<GeneratedFile> BuildAll(GenerationContext context, string adapterName, IPersistenceGenerator persistence)
+    /// <summary>
+    /// Every foundation file for one scaffolded solution. Scaffold-time only — `generate` never
+    /// rewrites these. Persistence *registration* (AddPersistence, schema init, DB health check) is
+    /// not here: the provider emits it from GenerateSolutionPersistence so it is regenerated with
+    /// full entity knowledge; this only wires the stable `AddInfrastructure` that calls into it.
+    /// </summary>
+    public static IReadOnlyList<GeneratedFile> BuildAll(GenerationContext context, string adapterName)
     {
         var files = new List<GeneratedFile>
         {
@@ -35,7 +40,7 @@ public static class FoundationFiles
 
             // Infrastructure-owned: technical implementations + persistence registration.
             new($"{context.Infrastructure.ProjectRoot}/Services/SystemDateTimeProvider.cs", BuildSystemDateTimeProvider(context)),
-            new($"{context.Infrastructure.ProjectRoot}/InfrastructureDependencyInjection.cs", BuildInfrastructureDependencyInjection(context, persistence)),
+            new($"{context.Infrastructure.ProjectRoot}/InfrastructureDependencyInjection.cs", BuildInfrastructureDependencyInjection(context)),
 
             // Api-owned: HTTP concerns.
             new($"{context.Api.ProjectRoot}/Common/IEndpointDefinition.cs", BuildEndpointDefinitionInterface(context)),
@@ -276,43 +281,31 @@ public static class FoundationFiles
         }
         """;
 
-    public static string BuildInfrastructureDependencyInjection(GenerationContext context, IPersistenceGenerator persistence)
-    {
-        var usings = new List<string>
-        {
-            "Microsoft.Extensions.Configuration",
-            "Microsoft.Extensions.DependencyInjection",
-        };
-        usings.AddRange(persistence.ServiceRegistrationUsings);
-        usings.Add($"{context.Application.RootNamespace}.Common.Abstractions");
-        usings.Add($"{context.Infrastructure.RootNamespace}.Services");
-
-        var registrationLines = persistence.BuildServiceRegistration(context);
-        var persistenceBlock = registrationLines.Count == 0
-            ? string.Empty
-            : "\n" + string.Join("\n", registrationLines.Select(l => $"        {l}"));
-
-        var usingBlock = string.Join("\n", usings.Distinct().Select(u => $"using {u};"));
-
-        return $$"""
-        {{usingBlock}}
+    public static string BuildInfrastructureDependencyInjection(GenerationContext context) =>
+        $$"""
+        using Microsoft.Extensions.Configuration;
+        using Microsoft.Extensions.DependencyInjection;
+        using {{context.Application.RootNamespace}}.Common.Abstractions;
+        using {{context.Infrastructure.RootNamespace}}.Services;
 
         namespace {{context.Infrastructure.RootNamespace}};
 
         /// <summary>
         /// Registers the technical implementations this solution's Infrastructure owns: the
-        /// persistence provider and the date/time clock.
+        /// date/time clock and — via the provider-generated <c>AddPersistence</c> extension (see
+        /// PersistenceRegistration.cs, regenerated on every `generate`) — the persistence provider,
+        /// its startup schema initialization, and its database health check.
         /// </summary>
         public static class InfrastructureDependencyInjection
         {
             public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
             {
-                services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();{{persistenceBlock}}
+                services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
+                services.AddPersistence(configuration);
                 return services;
             }
         }
         """;
-    }
 
     public static string BuildEndpointDefinitionInterface(GenerationContext context) =>
         $$"""
@@ -495,14 +488,22 @@ public static class FoundationFiles
 
     public static string BuildEndpointExtensions(GenerationContext context) =>
         $$"""
+        using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+
         namespace {{context.Api.RootNamespace}}.Common;
 
         public static class EndpointExtensions
         {
-            /// <summary>Maps health checks plus every discovered <see cref="IEndpointDefinition"/> — adding a feature never edits Program.cs.</summary>
+            /// <summary>
+            /// Maps the health probes plus every discovered <see cref="IEndpointDefinition"/> — adding
+            /// a feature never edits Program.cs. Liveness (<c>/health</c>) reports the process is up;
+            /// readiness (<c>/health/ready</c>) runs the DB-tagged checks so an orchestrator can tell
+            /// "started" from "can actually serve traffic".
+            /// </summary>
             public static WebApplication MapApiEndpoints(this WebApplication app)
             {
-                app.MapHealthChecks("/health");
+                app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false });
+                app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") });
 
                 foreach (var endpointType in typeof(EndpointExtensions).Assembly.GetTypes()
                     .Where(t => typeof(IEndpointDefinition).IsAssignableFrom(t) && t is { IsAbstract: false, IsInterface: false }))

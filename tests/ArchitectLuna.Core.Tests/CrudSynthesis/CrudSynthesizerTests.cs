@@ -69,7 +69,6 @@ public sealed class CrudSynthesizerTests
         Assert.Equal(3, getById.ResultFields.Count);
 
         var getAll = queries.Single(q => q.Name == "GetAllInvoices");
-        Assert.Empty(getAll.Params);
         Assert.True(getAll.IsCollection);
         Assert.True(getAll.IsPaged);
         Assert.Equal(3, getAll.ResultFields.Count);

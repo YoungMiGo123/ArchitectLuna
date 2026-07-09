@@ -52,21 +52,11 @@ public interface IPersistenceGenerator
     /// <summary>Same as <see cref="BindCommandHandler"/> but for a query handler.</summary>
     HandlerBinding BindQueryHandler(GenerationContext context, FeatureModel feature, EntityModel entity, QueryModel query);
 
-    /// <summary>
-    /// Source lines to splice into the generated `AddInfrastructure(IServiceCollection services,
-    /// IConfiguration configuration)` extension method to register this provider, e.g.
-    /// `services.AddDbContext...(configuration.GetConnectionString(...))`. Lines must reference
-    /// the `services` and `configuration` identifiers (never `builder.`) — Program.cs itself is
-    /// kept small and never regenerated per feature, so all registration detail lives behind the
-    /// extension method. Takes the full <see cref="GenerationContext"/> (not just the solution
-    /// name) so registration can correctly qualify the concrete type's namespace under
-    /// <see cref="GenerationContext.Infrastructure"/> and, when
-    /// <see cref="GenerationContext.HasSeparateInfrastructure"/>, also wire the interface
-    /// abstraction living in <see cref="GenerationContext.Application"/>. Return an empty list for
-    /// "no registration needed."
-    /// </summary>
-    IReadOnlyList<string> BuildServiceRegistration(GenerationContext context);
-
-    /// <summary>Using directives BuildServiceRegistration's lines need, e.g. "Microsoft.EntityFrameworkCore".</summary>
-    IReadOnlyList<string> ServiceRegistrationUsings { get; }
+    // Provider registration is no longer spliced into AddInfrastructure line-by-line. Instead each
+    // provider emits a full `AddPersistence(this IServiceCollection, IConfiguration)` extension in
+    // its own file from GenerateSolutionPersistence (so it is regenerated per `generate` with full
+    // entity knowledge — which Marten needs to RegisterDocumentType per document, and which lets a
+    // provider emit a startup schema initializer + DB health check). FoundationFiles'
+    // AddInfrastructure just calls services.AddPersistence(configuration). See each provider's
+    // RenderAddPersistence.
 }

@@ -22,7 +22,7 @@ public sealed class ProductionFoundationTests
     [InlineData("wolverine")]
     public void Foundation_PlacesEachFileInTheOwningProject(string adapter)
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.CleanArchitectureContext(), adapter, GenerationTestHarness.Persistence("in-memory"));
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.CleanArchitectureContext(), adapter);
         var paths = files.Select(f => f.RelativePath).ToHashSet();
 
         var expected = new[]
@@ -56,7 +56,7 @@ public sealed class ProductionFoundationTests
     [InlineData("wolverine")]
     public void DomainFiles_StayFreeOfDispatcherAndPersistenceConcerns(string adapter)
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.CleanArchitectureContext(), adapter, GenerationTestHarness.Persistence("efcore-postgres"));
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.CleanArchitectureContext(), adapter);
 
         foreach (var file in files.Where(f => f.RelativePath.StartsWith(Domain, StringComparison.Ordinal)))
         {
@@ -94,12 +94,33 @@ public sealed class ProductionFoundationTests
     }
 
     [Fact]
-    public void EfCore_AddInfrastructure_WiresTheApplicationOwnedInterfaceToTheConcreteDbContext()
+    public void AddInfrastructure_RegistersTheClockAndDelegatesToAddPersistence()
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.CleanArchitectureContext(), "mediatr", GenerationTestHarness.Persistence("efcore-postgres"));
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.CleanArchitectureContext(), "mediatr");
         var content = GenerationTestHarness.ContentOf(files, $"{Infrastructure}/InfrastructureDependencyInjection.cs");
 
-        Assert.Contains("services.AddDbContext<BillingService.Infrastructure.BillingServiceDbContext>", content);
-        Assert.Contains("services.AddScoped<BillingService.Application.Persistence.IBillingServiceDbContext>", content);
+        Assert.Contains("services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();", content);
+        Assert.Contains("services.AddPersistence(configuration);", content);
+    }
+
+    [Fact]
+    public void EfCore_AddPersistence_WiresTheApplicationOwnedInterfaceToTheConcreteDbContext()
+    {
+        var files = GenerationTestHarness.PersistenceSolutionFiles(GenerationTestHarness.CleanArchitectureContext(), "efcore-postgres", GenerationTestHarness.InvoiceFeature());
+        var content = GenerationTestHarness.ContentOf(files, $"{Infrastructure}/PersistenceRegistration.cs");
+
+        Assert.Contains("services.AddDbContext<BillingServiceDbContext>", content);
+        Assert.Contains("services.AddScoped<IBillingServiceDbContext>(sp => sp.GetRequiredService<BillingServiceDbContext>())", content);
+        Assert.Contains("services.AddHostedService<DatabaseInitializer>();", content);
+    }
+
+    [Fact]
+    public void Marten_AddPersistence_RegistersEachDocumentTypeInInfrastructure()
+    {
+        var files = GenerationTestHarness.PersistenceSolutionFiles(GenerationTestHarness.CleanArchitectureContext(), "marten", GenerationTestHarness.InvoiceFeature());
+        var content = GenerationTestHarness.ContentOf(files, $"{Infrastructure}/PersistenceRegistration.cs");
+
+        Assert.Contains("options.RegisterDocumentType<Invoice>();", content);
+        Assert.Contains("ApplyAllDatabaseChangesOnStartup()", content);
     }
 }
