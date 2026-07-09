@@ -1,0 +1,5 @@
+{
+  "$schema": "https://xunit.net/schema/current/xunit.runner.schema.json",
+  "//": "Each E2E test scaffolds a real solution (dozens of dotnet subprocesses) and compiles it — whole-machine work. Running test classes in parallel just makes them starve each other on a 4-vCPU runner until per-process timeouts fire, so this suite runs strictly serially.",
+  "parallelizeTestCollections": false
+}

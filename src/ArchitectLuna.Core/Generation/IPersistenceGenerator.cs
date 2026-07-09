@@ -53,16 +53,20 @@ public interface IPersistenceGenerator
     HandlerBinding BindQueryHandler(GenerationContext context, FeatureModel feature, EntityModel entity, QueryModel query);
 
     /// <summary>
-    /// Source lines to splice into the scaffolded Program.cs (after the adapter's own bootstrap,
-    /// before the app is built) to register this provider, e.g. `builder.Services.AddDbContext...`.
-    /// Takes the full <see cref="GenerationContext"/> (not just the solution name) so registration
-    /// can correctly qualify the concrete type's namespace under <see cref="GenerationContext.Infrastructure"/>
-    /// and, when <see cref="GenerationContext.HasSeparateInfrastructure"/>, also wire the interface
+    /// Source lines to splice into the generated `AddInfrastructure(IServiceCollection services,
+    /// IConfiguration configuration)` extension method to register this provider, e.g.
+    /// `services.AddDbContext...(configuration.GetConnectionString(...))`. Lines must reference
+    /// the `services` and `configuration` identifiers (never `builder.`) — Program.cs itself is
+    /// kept small and never regenerated per feature, so all registration detail lives behind the
+    /// extension method. Takes the full <see cref="GenerationContext"/> (not just the solution
+    /// name) so registration can correctly qualify the concrete type's namespace under
+    /// <see cref="GenerationContext.Infrastructure"/> and, when
+    /// <see cref="GenerationContext.HasSeparateInfrastructure"/>, also wire the interface
     /// abstraction living in <see cref="GenerationContext.Application"/>. Return an empty list for
     /// "no registration needed."
     /// </summary>
-    IReadOnlyList<string> BuildProgramCsRegistration(GenerationContext context);
+    IReadOnlyList<string> BuildServiceRegistration(GenerationContext context);
 
-    /// <summary>Using directives BuildProgramCsRegistration's lines need, e.g. "Microsoft.EntityFrameworkCore".</summary>
-    IReadOnlyList<string> ProgramCsUsings { get; }
+    /// <summary>Using directives BuildServiceRegistration's lines need, e.g. "Microsoft.EntityFrameworkCore".</summary>
+    IReadOnlyList<string> ServiceRegistrationUsings { get; }
 }

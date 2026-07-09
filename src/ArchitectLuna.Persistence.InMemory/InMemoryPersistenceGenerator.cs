@@ -15,8 +15,9 @@ namespace ArchitectLuna.Persistence.InMemory;
 /// model-level change (`--persistence`), not a rewrite: the entity shape and handler call sites
 /// look the same, only the injected dependency and its backing store differ.
 ///
-/// Entity classes go under <see cref="GenerationContext.Domain"/>/Entities; the store itself goes
-/// under <see cref="GenerationContext.Infrastructure"/>, matching EF Core's DbContext placement.
+/// Entity classes go under <see cref="GenerationContext.Domain"/>/Entities and inherit the
+/// scaffolded <c>BaseEntity</c> (Id + audit fields); the store itself goes under
+/// <see cref="GenerationContext.Infrastructure"/>, matching EF Core's DbContext placement.
 /// For vertical slice, Domain and Infrastructure are the same project (a "Persistence" subfolder
 /// of the API project), so this produces the same files/namespaces as before this provider existed
 /// alongside multi-root <see cref="GenerationContext"/>. For Clean Architecture, Domain and
@@ -27,8 +28,10 @@ namespace ArchitectLuna.Persistence.InMemory;
 /// instead of the concrete type.
 ///
 /// Handler bodies get the store (or its interface) injected (MediatR via constructor, Wolverine
-/// via an extra static-method parameter) and do straightforward Save/Find/Remove/GetAll calls —
-/// no repository layer, matching the tool's "simplistic" generated-code philosophy.
+/// via an extra static-method parameter), do straightforward Save/Find/Remove/GetAll calls — no
+/// repository layer, matching the tool's "simplistic" generated-code philosophy — and return
+/// <c>Result&lt;T&gt;</c> outcomes (NotFound as an explicit failure, never an exception for a
+/// normal business outcome).
 /// </summary>
 public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
 {
@@ -41,7 +44,7 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
 
     public IReadOnlyList<string> ApplicationRequiredPackages { get; } = Array.Empty<string>();
 
-    public IReadOnlyList<string> ProgramCsUsings { get; } = Array.Empty<string>();
+    public IReadOnlyList<string> ServiceRegistrationUsings { get; } = Array.Empty<string>();
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
     {
@@ -52,9 +55,10 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
     public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities)
     {
         // Always emits the store (it's generic — Save<T>/Find<T>/etc. — so it needs no per-entity
-        // content) rather than only once an entity exists: Program.cs references this type
-        // unconditionally as soon as in-memory persistence is configured, so the freshly scaffolded
-        // solution (before the first `generate`) needs it to already exist and compile.
+        // content) rather than only once an entity exists: the generated AddInfrastructure
+        // references this type unconditionally as soon as in-memory persistence is configured, so
+        // the freshly scaffolded solution (before the first `generate`) needs it to already exist
+        // and compile.
         var files = new List<GeneratedFile>
         {
             new($"{context.Infrastructure.ProjectRoot}/{StoreClassName}.cs", RenderStoreClass(context)),
@@ -96,20 +100,20 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
         return new HandlerBinding(body, DependencyTypeName(context), "store", HandlerUsings(context));
     }
 
-    public IReadOnlyList<string> BuildProgramCsRegistration(GenerationContext context)
+    public IReadOnlyList<string> BuildServiceRegistration(GenerationContext context)
     {
-        // Fully qualified rather than relying on a "using ...;" being present in Program.cs —
-        // keeps this independent of whichever usings the caller composes.
+        // Fully qualified rather than relying on a "using ...;" being present in the generated
+        // AddInfrastructure file — keeps this independent of whichever usings the caller composes.
         var qualifiedStoreName = $"{context.Infrastructure.RootNamespace}.{StoreClassName}";
         var lines = new List<string>
         {
-            $"builder.Services.AddSingleton<{qualifiedStoreName}>();",
+            $"services.AddSingleton<{qualifiedStoreName}>();",
         };
 
         if (context.HasSeparateInfrastructure)
         {
             var qualifiedInterfaceName = $"{context.Application.RootNamespace}.Persistence.{StoreInterfaceName}";
-            lines.Add($"builder.Services.AddSingleton<{qualifiedInterfaceName}>(sp => sp.GetRequiredService<{qualifiedStoreName}>());");
+            lines.Add($"services.AddSingleton<{qualifiedInterfaceName}>(sp => sp.GetRequiredService<{qualifiedStoreName}>());");
         }
 
         return lines;
@@ -121,19 +125,28 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
     private static List<string> HandlerUsings(GenerationContext context) => new()
     {
         context.HasSeparateInfrastructure ? $"{context.Application.RootNamespace}.Persistence" : context.Infrastructure.RootNamespace,
+        $"{context.Application.RootNamespace}.Common.Results",
         $"{context.Domain.RootNamespace}.Entities",
     };
 
     private static string RenderEntityClass(GenerationContext context, EntityModel entity)
     {
         var sb = new StringBuilder();
+        sb.AppendLine($"using {context.Domain.RootNamespace}.Common;");
+        sb.AppendLine();
         sb.AppendLine($"namespace {context.Domain.RootNamespace}.Entities;");
         sb.AppendLine();
-        sb.AppendLine($"public sealed class {entity.Name}");
+        sb.AppendLine($"public sealed class {entity.Name} : BaseEntity");
         sb.AppendLine("{");
-        sb.AppendLine("    public Guid Id { get; set; }");
+        var first = true;
         foreach (var field in entity.Fields)
         {
+            if (!first)
+            {
+                sb.AppendLine();
+            }
+
+            first = false;
             sb.AppendLine($"    public {field.Type} {field.Name} {{ get; set; }}{DefaultInitializer(field.Type)}");
         }
 
@@ -174,8 +187,8 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
         /// <summary>
         /// Process-lifetime store backing the "in-memory" persistence provider. One dictionary
         /// keyed by (entity type, id) covers every entity — no per-entity registration needed in
-        /// Program.cs. Registered as a singleton, so data survives across requests but not across
-        /// an app restart.
+        /// startup code. Registered as a singleton, so data survives across requests but not
+        /// across an app restart.
         /// </summary>
         public sealed class {{StoreClassName}}{{baseList}}
         {
@@ -209,30 +222,40 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
 
         sb.AppendLine("};");
         sb.AppendLine("store.Save(entity.Id, entity);");
-        sb.Append($"return new {resultName}(entity.Id);");
+        sb.Append($"return Result<{resultName}>.Success(new {resultName}(entity.Id));");
         return sb.ToString();
     }
 
     private static string RenderUpdateBody(EntityModel entity, string resultName)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"var entity = store.Find<{entity.Name}>(message.Id)");
-        sb.AppendLine($"    ?? throw new KeyNotFoundException($\"{entity.Name} '{{message.Id}}' was not found.\");");
+        sb.AppendLine($"var entity = store.Find<{entity.Name}>(message.Id);");
+        sb.AppendLine("if (entity is null)");
+        sb.AppendLine("{");
+        sb.AppendLine($"    return Result<{resultName}>.Failure(Error.NotFound($\"{entity.Name} '{{message.Id}}' was not found.\"));");
+        sb.AppendLine("}");
+        sb.AppendLine();
         foreach (var field in entity.Fields)
         {
             sb.AppendLine($"entity.{field.Name} = message.{field.Name};");
         }
 
         sb.AppendLine("store.Save(entity.Id, entity);");
-        sb.Append($"return new {resultName}(entity.Id);");
+        sb.Append($"return Result<{resultName}>.Success(new {resultName}(entity.Id));");
         return sb.ToString();
     }
 
     private static string RenderDeleteBody(EntityModel entity, string resultName)
     {
         var sb = new StringBuilder();
+        sb.AppendLine($"var entity = store.Find<{entity.Name}>(message.Id);");
+        sb.AppendLine("if (entity is null)");
+        sb.AppendLine("{");
+        sb.AppendLine($"    return Result<{resultName}>.Failure(Error.NotFound($\"{entity.Name} '{{message.Id}}' was not found.\"));");
+        sb.AppendLine("}");
+        sb.AppendLine();
         sb.AppendLine($"store.Remove<{entity.Name}>(message.Id);");
-        sb.Append($"return new {resultName}(message.Id);");
+        sb.Append($"return Result<{resultName}>.Success(new {resultName}(message.Id));");
         return sb.ToString();
     }
 
@@ -240,9 +263,13 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
     {
         var args = string.Join(", ", new[] { "entity.Id" }.Concat(entity.Fields.Select(f => $"entity.{f.Name}")));
         var sb = new StringBuilder();
-        sb.AppendLine($"var entity = store.Find<{entity.Name}>(message.Id)");
-        sb.AppendLine($"    ?? throw new KeyNotFoundException($\"{entity.Name} '{{message.Id}}' was not found.\");");
-        sb.Append($"return new {resultName}({args});");
+        sb.AppendLine($"var entity = store.Find<{entity.Name}>(message.Id);");
+        sb.AppendLine("if (entity is null)");
+        sb.AppendLine("{");
+        sb.AppendLine($"    return Result<{resultName}>.Failure(Error.NotFound($\"{entity.Name} '{{message.Id}}' was not found.\"));");
+        sb.AppendLine("}");
+        sb.AppendLine();
+        sb.Append($"return Result<{resultName}>.Success(new {resultName}({args}));");
         return sb.ToString();
     }
 
@@ -251,7 +278,7 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
         var args = string.Join(", ", new[] { "entity.Id" }.Concat(entity.Fields.Select(f => $"entity.{f.Name}")));
         var sb = new StringBuilder();
         sb.AppendLine($"var entities = store.GetAll<{entity.Name}>();");
-        sb.Append($"return entities.Select(entity => new {resultName}({args})).ToList();");
+        sb.Append($"return Result<IReadOnlyList<{resultName}>>.Success(entities.Select(entity => new {resultName}({args})).ToList());");
         return sb.ToString();
     }
 }

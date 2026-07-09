@@ -23,9 +23,9 @@ public sealed class NewApiCommandSettings : CommandSettings
     public string Persistence { get; init; } = "in-memory";
 
     [CommandOption("--architecture")]
-    [Description("Solution layout: vertical-slice (single Api project, features live inside it) or clean-architecture (Api/Application/Domain/Infrastructure projects).")]
-    [DefaultValue("vertical-slice")]
-    public string Architecture { get; init; } = "vertical-slice";
+    [Description("Solution layout: clean-architecture (default; Api/Application/Domain/Infrastructure/Contracts projects) or vertical-slice (single Api project, features live inside it).")]
+    [DefaultValue("clean-architecture")]
+    public string Architecture { get; init; } = "clean-architecture";
 }
 
 public sealed class NewApiCommand : Command<NewApiCommandSettings>

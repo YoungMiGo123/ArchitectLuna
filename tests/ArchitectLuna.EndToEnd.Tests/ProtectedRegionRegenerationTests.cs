@@ -29,7 +29,7 @@ public sealed class ProtectedRegionRegenerationTests
         var workDir = TempWorkspace.CreateUnique();
         try
         {
-            var newApi = ProcessRunner.RunCli(cliDllPath, workDir, "new", "api", SolutionName, "--adapter", "mediatr", "--persistence", "none");
+            var newApi = ProcessRunner.RunCli(cliDllPath, workDir, "new", "api", SolutionName, "--adapter", "mediatr", "--persistence", "none", "--architecture", "vertical-slice");
             Assert.True(newApi.ExitCode == 0, $"'new api' failed:\n{newApi}");
 
             var solutionRoot = Path.Combine(workDir, SolutionName);

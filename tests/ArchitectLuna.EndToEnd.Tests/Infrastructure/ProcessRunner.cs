@@ -13,7 +13,10 @@ public sealed record ProcessResult(int ExitCode, string StandardOutput, string S
 /// <summary>Shells out to a process (the built CLI, or `dotnet build`) and captures its result.</summary>
 public static class ProcessRunner
 {
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(5);
+    // Generous because a Clean Architecture scaffold shells out to ~20 sequential
+    // `dotnet add package` calls, each of which round-trips to the NuGet feed even when the
+    // package is already in the local cache.
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(10);
 
     public static ProcessResult Run(string fileName, IReadOnlyList<string> arguments, string workingDirectory, TimeSpan? timeout = null)
     {
