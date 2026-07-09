@@ -11,4 +11,4 @@ delete completed plans — they are the design history of the project.
 
 | # | Plan | Status |
 |---|---|---|
-| — | *(none yet)* | |
+| 001 | [Production foundation + testing layer](001-production-foundation-and-testing-layer.md) | In progress |
