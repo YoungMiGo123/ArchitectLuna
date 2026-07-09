@@ -57,6 +57,7 @@ public static class CrudSynthesizer
             Params = new List<ParamModel>(),
             ResultFields = resultFields,
             IsCollection = true,
+            IsPaged = true,
             EntityName = entity.Name,
         };
 

@@ -33,6 +33,17 @@ public sealed class MediatRAdapter : IFrameworkAdapter
     private const string DispatcherType = "ISender";
     private const string DispatcherParam = "sender";
 
+    /// <summary>
+    /// Appended to a paged query's message fields (never to <see cref="QueryModel.Params"/> —
+    /// see <see cref="QueryModel.IsPaged"/>'s doc comment). Missing from the query string, they
+    /// bind to 0; the persistence generator's paged handler body clamps that to a real default.
+    /// </summary>
+    private static readonly IReadOnlyList<MessageFieldRenderModel> PagingFields = new[]
+    {
+        new MessageFieldRenderModel { Name = "Page", Type = "int" },
+        new MessageFieldRenderModel { Name = "PageSize", Type = "int" },
+    };
+
     private readonly TemplateEngine _templateEngine = new();
     private readonly EmbeddedTemplateProvider _templateProvider = new();
     private readonly IPersistenceGenerator _persistence;
@@ -207,9 +218,16 @@ public sealed class MediatRAdapter : IFrameworkAdapter
             ? query.ResultFields.Select(f => new MessageFieldRenderModel { Name = f.Name, Type = f.Type }).ToList()
             : parameters;
 
-        var wrappedResultType = query.IsCollection
-            ? $"Result<IReadOnlyList<{names.Result}>>"
-            : $"Result<{names.Result}>";
+        if (query.IsPaged)
+        {
+            parameters = parameters.Concat(PagingFields).ToList();
+        }
+
+        var wrappedResultType = query.IsPaged
+            ? $"Result<PagedResult<{names.Result}>>"
+            : query.IsCollection
+                ? $"Result<IReadOnlyList<{names.Result}>>"
+                : $"Result<{names.Result}>";
 
         var binding = BindQuery(context, feature, query);
 
@@ -230,8 +248,8 @@ public sealed class MediatRAdapter : IFrameworkAdapter
             HandlerDependencyParam = binding.DependencyParam,
         };
 
-        var isSingleRouteParam = query.Params.Count == 1 && query.Params[0].Name.EndsWith("Id", StringComparison.Ordinal);
-        var isZeroParam = query.Params.Count == 0;
+        var isSingleRouteParam = !query.IsPaged && query.Params.Count == 1 && query.Params[0].Name.EndsWith("Id", StringComparison.Ordinal);
+        var isZeroParam = !query.IsPaged && query.Params.Count == 0;
         var routeParamName = isSingleRouteParam ? NamingConventions.ToCamelCase(query.Params[0].Name) : null;
 
         var dispatchCall = isSingleRouteParam
@@ -240,9 +258,11 @@ public sealed class MediatRAdapter : IFrameworkAdapter
                 ? $"{DispatcherParam}.Send(new {names.Message}(), cancellationToken)"
                 : $"{DispatcherParam}.Send(query, cancellationToken)";
 
-        var successExpression = query.IsCollection
-            ? "Results.Ok(result.Value.Select(item => item.ToResponse()).ToList())"
-            : "Results.Ok(result.Value.ToResponse())";
+        var successExpression = query.IsPaged
+            ? "Results.Ok(new { items = result.Value.Items.Select(item => item.ToResponse()).ToList(), result.Value.Page, result.Value.PageSize, result.Value.TotalCount, result.Value.TotalPages, result.Value.HasNextPage, result.Value.HasPreviousPage })"
+            : query.IsCollection
+                ? "Results.Ok(result.Value.Select(item => item.ToResponse()).ToList())"
+                : "Results.Ok(result.Value.ToResponse())";
 
         var endpointModel = new QueryEndpointRenderModel
         {

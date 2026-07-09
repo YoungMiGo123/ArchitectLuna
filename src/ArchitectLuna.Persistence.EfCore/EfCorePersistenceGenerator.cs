@@ -104,9 +104,11 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         var resultName = $"{query.Name}Result";
         var dbSetName = NamingConventions.Pluralize(entity.Name);
 
-        var body = query.IsCollection
-            ? RenderGetAllBody(entity, resultName, dbSetName)
-            : RenderGetByIdBody(entity, resultName, dbSetName);
+        var body = query.IsPaged
+            ? RenderPagedGetAllBody(entity, resultName, dbSetName)
+            : query.IsCollection
+                ? RenderGetAllBody(entity, resultName, dbSetName)
+                : RenderGetByIdBody(entity, resultName, dbSetName);
 
         return new HandlerBinding(body, DependencyTypeName(context), "dbContext", HandlerUsings(context));
     }
@@ -336,6 +338,18 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         var sb = new StringBuilder();
         sb.AppendLine($"var entities = await dbContext.{dbSetName}.AsNoTracking().ToListAsync(cancellationToken);");
         sb.Append($"return Result<IReadOnlyList<{resultName}>>.Success(entities.Select(entity => new {resultName}({args})).ToList());");
+        return sb.ToString();
+    }
+
+    private static string RenderPagedGetAllBody(EntityModel entity, string resultName, string dbSetName)
+    {
+        var args = string.Join(", ", new[] { "entity.Id" }.Concat(entity.Fields.Select(f => $"entity.{f.Name}")));
+        var sb = new StringBuilder();
+        sb.AppendLine("var page = message.Page <= 0 ? 1 : message.Page;");
+        sb.AppendLine("var pageSize = message.PageSize <= 0 ? 20 : message.PageSize;");
+        sb.AppendLine($"var totalCount = await dbContext.{dbSetName}.LongCountAsync(cancellationToken);");
+        sb.AppendLine($"var entities = await dbContext.{dbSetName}.AsNoTracking().OrderBy(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);");
+        sb.Append($"return Result<PagedResult<{resultName}>>.Success(new PagedResult<{resultName}>(entities.Select(entity => new {resultName}({args})).ToList(), page, pageSize, totalCount));");
         return sb.ToString();
     }
 }

@@ -102,6 +102,18 @@
   WolverineFx stopped shipping its runtime compiler: generated Wolverine apps compiled but threw
   at startup; fixed via `WolverineFx.RuntimeCompilation` + `opts.UseRuntimeCompilation()`).
 
+- **Pagination for generated GetAll queries** (plan: `docs/plans/002-crud-getall-pagination.md`).
+  Every CRUD-synthesized `GetAll{Entity}` query now accepts `page`/`pageSize` query-string
+  parameters and returns `Result<PagedResult<T>>` — `PagedResult<T>` existed since the production
+  foundation but was unused dead code until now. All three persistence providers page with
+  `Skip`/`Take` (or the Marten/EF Core equivalent) instead of loading the entire table, ordered by
+  `Id` for deterministic paging; missing page/pageSize default to page 1 / 20 items. Works
+  identically across `mediatr`/`wolverine` and both `vertical-slice`/`clean-architecture` layouts —
+  Page/PageSize never join `QueryModel.Params`, so the route stays the plain collection route
+  (`GET /api/{feature}`) with no `RouteInference` changes. Out of scope: hand-authored
+  `add query --collection` queries (not CRUD-synthesized) are still unbounded; a typed Contracts
+  `PagedResponse<T>` DTO (currently an anonymous object) is a follow-up.
+
 ## Near-term — get to a demoable prototype
 
 - **`invero doctor` / `--verify`.** Run `dotnet build` after `generate` and map errors back to the
