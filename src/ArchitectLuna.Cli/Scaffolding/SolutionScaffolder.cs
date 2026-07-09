@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using ArchitectLuna.Cli.Adapters;
+using ArchitectLuna.Core.Generation;
 using ArchitectLuna.Core.Manifest;
 using ArchitectLuna.Core.Model;
 using ArchitectLuna.Core.Yaml;
@@ -13,7 +14,7 @@ namespace ArchitectLuna.Cli.Scaffolding;
 /// </summary>
 public static class SolutionScaffolder
 {
-    public static string Scaffold(string parentDirectory, string solutionName, string adapterName)
+    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "none")
     {
         var root = Path.Combine(parentDirectory, solutionName);
         if (Directory.Exists(root))
@@ -21,7 +22,9 @@ public static class SolutionScaffolder
             throw new InvalidOperationException($"Directory '{root}' already exists.");
         }
 
+        var persistenceProvider = PersistenceRegistry.ParseProvider(persistenceName);
         var adapter = AdapterRegistry.Resolve(adapterName);
+        var persistence = PersistenceRegistry.Resolve(persistenceName);
 
         Directory.CreateDirectory(root);
         RunDotnet(root, "new", "sln", "-n", solutionName);
@@ -32,15 +35,20 @@ public static class SolutionScaffolder
 
         var csprojPath = Path.Combine(apiProjectDir, $"{solutionName}.Api.csproj");
         File.WriteAllText(csprojPath, BuildCsproj());
-        File.WriteAllText(Path.Combine(apiProjectDir, "Program.cs"), BuildProgramCs(solutionName, adapterName));
+        File.WriteAllText(Path.Combine(apiProjectDir, "Program.cs"), BuildProgramCs(solutionName, adapterName, persistence));
 
         var commonDir = Path.Combine(apiProjectDir, "Common");
         Directory.CreateDirectory(commonDir);
         File.WriteAllText(Path.Combine(commonDir, "IEndpointDefinition.cs"), BuildEndpointDefinitionInterface(solutionName));
 
+        if (persistenceProvider != PersistenceProvider.None)
+        {
+            File.WriteAllText(Path.Combine(apiProjectDir, "appsettings.json"), BuildAppSettings(solutionName, persistenceProvider));
+        }
+
         RunDotnet(root, "sln", "add", Path.Combine(apiProjectRelative, $"{solutionName}.Api.csproj"));
 
-        foreach (var package in adapter.RequiredPackages)
+        foreach (var package in adapter.RequiredPackages.Concat(persistence.RequiredPackages))
         {
             RunDotnet(root, "add", csprojPath, "package", package);
         }
@@ -51,6 +59,7 @@ public static class SolutionScaffolder
             SolutionName = solutionName,
             Namespace = solutionName,
             Adapter = adapterName,
+            Persistence = persistenceProvider,
             Features = new List<FeatureModel>(),
         };
         ModelSerializer.Save(Path.Combine(root, ".architect", "model.yaml"), model);
@@ -74,54 +83,62 @@ public static class SolutionScaffolder
         </Project>
         """;
 
-    private static string BuildProgramCs(string solutionName, string adapterName) => adapterName switch
+    private static string BuildProgramCs(string solutionName, string adapterName, IPersistenceGenerator persistence)
     {
-        "mediatr" =>
-            $$"""
-            using FluentValidation;
-            using MediatR;
-            using {{solutionName}}.Common;
+        var (adapterUsings, bootstrapLines) = adapterName switch
+        {
+            "mediatr" => (
+                new[] { "FluentValidation", "MediatR" },
+                new[]
+                {
+                    "builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));",
+                    "builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);",
+                }),
+            "wolverine" => (
+                new[] { "FluentValidation", "Wolverine" },
+                new[]
+                {
+                    "builder.Host.UseWolverine();",
+                    "builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);",
+                }),
+            _ => throw new InvalidOperationException($"Unknown adapter '{adapterName}'."),
+        };
 
-            var builder = WebApplication.CreateBuilder(args);
+        var usings = adapterUsings
+            .Concat(persistence.ProgramCsUsings)
+            .Concat(new[] { $"{solutionName}.Common" })
+            .Distinct()
+            .Select(u => $"using {u};");
 
-            builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
-            builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+        var bodyLines = bootstrapLines.Concat(persistence.BuildProgramCsRegistration(solutionName));
 
-            var app = builder.Build();
+        var sb = new System.Text.StringBuilder();
+        foreach (var u in usings)
+        {
+            sb.AppendLine(u);
+        }
 
-            foreach (var endpointType in typeof(Program).Assembly.GetTypes()
-                .Where(t => typeof(IEndpointDefinition).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface))
-            {
-                var endpoint = (IEndpointDefinition)Activator.CreateInstance(endpointType)!;
-                endpoint.Map(app);
-            }
+        sb.AppendLine();
+        sb.AppendLine("var builder = WebApplication.CreateBuilder(args);");
+        sb.AppendLine();
+        foreach (var line in bodyLines)
+        {
+            sb.AppendLine(line);
+        }
 
-            app.Run();
-            """,
-        "wolverine" =>
-            $$"""
-            using FluentValidation;
-            using Wolverine;
-            using {{solutionName}}.Common;
-
-            var builder = WebApplication.CreateBuilder(args);
-
-            builder.Host.UseWolverine();
-            builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
-
-            var app = builder.Build();
-
-            foreach (var endpointType in typeof(Program).Assembly.GetTypes()
-                .Where(t => typeof(IEndpointDefinition).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface))
-            {
-                var endpoint = (IEndpointDefinition)Activator.CreateInstance(endpointType)!;
-                endpoint.Map(app);
-            }
-
-            app.Run();
-            """,
-        _ => throw new InvalidOperationException($"Unknown adapter '{adapterName}'."),
-    };
+        sb.AppendLine();
+        sb.AppendLine("var app = builder.Build();");
+        sb.AppendLine();
+        sb.AppendLine("foreach (var endpointType in typeof(Program).Assembly.GetTypes()");
+        sb.AppendLine("    .Where(t => typeof(IEndpointDefinition).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface))");
+        sb.AppendLine("{");
+        sb.AppendLine("    var endpoint = (IEndpointDefinition)Activator.CreateInstance(endpointType)!;");
+        sb.AppendLine("    endpoint.Map(app);");
+        sb.AppendLine("}");
+        sb.AppendLine();
+        sb.Append("app.Run();");
+        return sb.ToString();
+    }
 
     private static string BuildEndpointDefinitionInterface(string solutionName) =>
         $$"""
@@ -132,6 +149,31 @@ public static class SolutionScaffolder
             void Map(IEndpointRouteBuilder app);
         }
         """;
+
+    private static string BuildAppSettings(string solutionName, PersistenceProvider provider)
+    {
+        var connectionString = provider switch
+        {
+            PersistenceProvider.EfCorePostgres => $"Host=localhost;Database={solutionName.ToLowerInvariant()};Username=postgres;Password=postgres",
+            PersistenceProvider.EfCoreSqlServer => $"Server=localhost;Database={solutionName};Trusted_Connection=True;TrustServerCertificate=True",
+            PersistenceProvider.Marten => $"Host=localhost;Database={solutionName.ToLowerInvariant()};Username=postgres;Password=postgres",
+            _ => string.Empty,
+        };
+
+        return $$"""
+        {
+          "ConnectionStrings": {
+            "Default": "{{connectionString}}"
+          },
+          "Logging": {
+            "LogLevel": {
+              "Default": "Information",
+              "Microsoft.AspNetCore": "Warning"
+            }
+          }
+        }
+        """;
+    }
 
     private const string GitIgnoreContent =
         """

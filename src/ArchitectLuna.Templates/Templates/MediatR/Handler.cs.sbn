@@ -16,7 +16,7 @@ public sealed class {{ handler_name }} : IRequestHandler<{{ message_name }}, {{ 
     }
 
     {{ end }}
-    public Task<{{ result_type }}> Handle({{ message_name }} request, CancellationToken cancellationToken)
+    public async Task<{{ result_type }}> Handle({{ message_name }} message, CancellationToken cancellationToken)
     {
         // <architect:region name="handler-body">
         {{ handler_body }}

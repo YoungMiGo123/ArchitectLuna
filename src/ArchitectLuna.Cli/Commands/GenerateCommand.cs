@@ -34,13 +34,26 @@ public sealed class GenerateCommand : Command<GenerateCommandSettings>
             return 1;
         }
 
-        var adapter = AdapterRegistry.Resolve(model.Adapter);
+        var persistence = PersistenceRegistry.Resolve(model.Persistence);
+        var adapter = AdapterRegistry.Resolve(model.Adapter, persistence);
         var generationContext = new GenerationContext(model.Namespace, $"src/{model.SolutionName}.Api");
         var manifest = ManifestStore.Load(manifestPath);
 
         var fileCount = 0;
+        var allEntities = new List<EntityReference>();
+
         foreach (var feature in model.Features)
         {
+            foreach (var entity in feature.Entities)
+            {
+                allEntities.Add(new EntityReference(feature, entity));
+                foreach (var file in persistence.GenerateEntityPersistence(generationContext, feature, entity))
+                {
+                    FileWriter.Write(root, file, manifest);
+                    fileCount++;
+                }
+            }
+
             foreach (var command in feature.Commands)
             {
                 foreach (var file in adapter.GenerateCommand(generationContext, feature, command))
@@ -60,9 +73,15 @@ public sealed class GenerateCommand : Command<GenerateCommandSettings>
             }
         }
 
+        foreach (var file in persistence.GenerateSolutionPersistence(generationContext, allEntities))
+        {
+            FileWriter.Write(root, file, manifest);
+            fileCount++;
+        }
+
         ManifestStore.Save(manifestPath, manifest);
 
-        AnsiConsole.MarkupLineInterpolated($"[green]Generated {fileCount} file(s) using the '{model.Adapter}' adapter.[/]");
+        AnsiConsole.MarkupLineInterpolated($"[green]Generated {fileCount} file(s) using the '{model.Adapter}' adapter (persistence: {model.Persistence}).[/]");
         return 0;
     }
 }

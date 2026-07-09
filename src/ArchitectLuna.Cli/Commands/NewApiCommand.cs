@@ -15,6 +15,11 @@ public sealed class NewApiCommandSettings : CommandSettings
     [Description("Backend adapter: mediatr or wolverine.")]
     [DefaultValue("mediatr")]
     public string Adapter { get; init; } = "mediatr";
+
+    [CommandOption("--persistence")]
+    [Description("Persistence provider: none, efcore-postgres, efcore-sqlserver, or marten.")]
+    [DefaultValue("none")]
+    public string Persistence { get; init; } = "none";
 }
 
 public sealed class NewApiCommand : Command<NewApiCommandSettings>
@@ -27,8 +32,14 @@ public sealed class NewApiCommand : Command<NewApiCommandSettings>
             return 1;
         }
 
-        var root = SolutionScaffolder.Scaffold(Directory.GetCurrentDirectory(), settings.Name, settings.Adapter);
-        AnsiConsole.MarkupLineInterpolated($"[green]Created {settings.Name} at {root} (adapter: {settings.Adapter}).[/]");
+        if (!PersistenceRegistry.KnownProviders.Contains(settings.Persistence))
+        {
+            AnsiConsole.MarkupLineInterpolated($"[red]Unknown persistence provider '{settings.Persistence}'. Valid values: {string.Join(", ", PersistenceRegistry.KnownProviders)}.[/]");
+            return 1;
+        }
+
+        var root = SolutionScaffolder.Scaffold(Directory.GetCurrentDirectory(), settings.Name, settings.Adapter, settings.Persistence);
+        AnsiConsole.MarkupLineInterpolated($"[green]Created {settings.Name} at {root} (adapter: {settings.Adapter}, persistence: {settings.Persistence}).[/]");
         return 0;
     }
 }

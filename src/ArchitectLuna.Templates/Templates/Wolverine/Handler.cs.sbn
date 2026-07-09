@@ -6,7 +6,7 @@ namespace {{ namespace }};
 
 public static class {{ handler_name }}
 {
-    public static {{ result_type }} Handle({{ message_name }} message{{ if has_handler_dependency }}, {{ handler_dependency_type }} {{ handler_dependency_param }}{{ end }})
+    public static async Task<{{ result_type }}> Handle({{ message_name }} message{{ if has_handler_dependency }}, {{ handler_dependency_type }} {{ handler_dependency_param }}{{ end }}, CancellationToken cancellationToken)
     {
         // <architect:region name="handler-body">
         {{ handler_body }}
