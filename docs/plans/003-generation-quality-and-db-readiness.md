@@ -144,11 +144,13 @@ scaffolds one API per model — there is no second "service" to document separat
    (compare file bytes before/after).
 5. **Result/exception-middleware polish** — files: `Cli/Scaffolding/FoundationFiles.cs`
    (`BuildExceptionHandlingMiddleware`) adds `DbUpdateConcurrencyException` → 409 Conflict and
-   `DbUpdateException` → 500 (logged, no stack trace) catch arms, gated to only appear when the
-   selected persistence provider is EF Core (Marten/InMemory/None solutions shouldn't reference
-   `Microsoft.EntityFrameworkCore` in Api) — verify: `Template.Tests` snapshot per persistence
-   provider confirming the right catch arms (and only those) appear, plus confirms Api project
-   only gets an EF Core `using` when the extra arms are present.
+   `DbUpdateException` → 500 (logged) catch arms. Implemented as `catch (Exception ex) when
+   (ex.GetType().Name == "DbUpdateConcurrencyException")` — matched by type name rather than a
+   `catch (DbUpdateException ex)` clause, so the one generated middleware file works unchanged for
+   every persistence provider without the Api project needing an EF Core package reference it
+   otherwise has no reason to carry (simpler than the originally-planned per-provider gating, same
+   behavior) — verify: `Template.Tests` snapshot confirming both catch arms are present and their
+   status codes are correct.
 6. **EF Core Design package + design-time factory** — files:
    `ArchitectLuna.Persistence.EfCore/EfCorePersistenceGenerator.cs` adds
    `Microsoft.EntityFrameworkCore.Design` to Infrastructure's (or the single vertical-slice

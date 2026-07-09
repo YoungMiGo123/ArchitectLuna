@@ -139,6 +139,18 @@ public sealed class ProductionFoundationTests
         Assert.Contains("IEndpointDefinition", endpoints);
     }
 
+    [Fact]
+    public void ExceptionMiddleware_HandlesDbUpdateConcurrencyAsConflictAndDbUpdateAsLoggedFailure()
+    {
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("in-memory"));
+        var middleware = GenerationTestHarness.ContentOf(files, $"{Api}/Common/ExceptionHandlingMiddleware.cs");
+
+        Assert.Contains("DbUpdateConcurrencyException", middleware);
+        Assert.Contains("StatusCodes.Status409Conflict", middleware);
+        Assert.Contains("DbUpdateException", middleware);
+        Assert.Contains("Database update failed", middleware);
+    }
+
     [Theory]
     [InlineData("mediatr", "AddMediatR", true)]
     [InlineData("mediatr", "AddValidatorsFromAssembly", true)]

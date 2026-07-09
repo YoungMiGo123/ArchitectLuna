@@ -338,8 +338,17 @@ public static class FoundationFiles
         /// Last-resort translation of exceptions to consistent problem+json responses. Normal
         /// business outcomes flow through the Result pattern, not exceptions — this middleware
         /// covers hand-written code that throws: FluentValidation's ValidationException becomes
-        /// 400, KeyNotFoundException 404, UnauthorizedAccessException 403, and anything unhandled
-        /// is logged and returned as a safe, generic 500.
+        /// 400, KeyNotFoundException 404, UnauthorizedAccessException 403, a concurrency conflict
+        /// (matched by type name, not a hard EF Core reference — see below) becomes 409, any other
+        /// database update failure is logged and returned as a safe 500, and anything else
+        /// unhandled is logged and returned as a safe, generic 500.
+        ///
+        /// EF Core's DbUpdateException/DbUpdateConcurrencyException are matched by
+        /// <c>ex.GetType().Name</c> instead of a `catch (DbUpdateException ex)` clause: the Api
+        /// project doesn't otherwise reference EF Core (that's an Infrastructure/Application
+        /// concern — see docs/ARCHITECTURE.md's layout section), and this middleware is the same
+        /// file for every persistence provider, so it can't special-case EF without either an
+        /// unwanted package reference or generating a second variant of this file.
         /// </summary>
         public sealed class ExceptionHandlingMiddleware
         {
@@ -374,6 +383,15 @@ public static class FoundationFiles
                 catch (UnauthorizedAccessException ex)
                 {
                     await WriteProblem(context, StatusCodes.Status403Forbidden, ex.Message);
+                }
+                catch (Exception ex) when (ex.GetType().Name == "DbUpdateConcurrencyException")
+                {
+                    await WriteProblem(context, StatusCodes.Status409Conflict, "The record was modified or deleted by another process.");
+                }
+                catch (Exception ex) when (ex.GetType().Name == "DbUpdateException")
+                {
+                    _logger.LogError(ex, "Database update failed for {Method} {Path}", context.Request.Method, context.Request.Path);
+                    await WriteProblem(context, StatusCodes.Status500InternalServerError, "A database error occurred.");
                 }
                 catch (Exception ex)
                 {
