@@ -108,9 +108,16 @@ public sealed class MediatRAdapter : IFrameworkAdapter
 
         var successExpression = command.Kind switch
         {
-            CommandKind.Create => $"Results.Created($\"{route}/{{result.Value.Id}}\", result.Value.ToResponse())",
-            CommandKind.Update => "Results.Ok(result.Value.ToResponse())",
-            _ => "Results.NoContent()",
+            CommandKind.Create => $"result.ToCreatedResponse(value => $\"{route}/{{value.Id}}\", value => value.ToResponse())",
+            CommandKind.Update => "result.ToOkResponse(value => value.ToResponse())",
+            _ => "result.ToNoContentResponse()",
+        };
+
+        var successStatusCode = command.Kind switch
+        {
+            CommandKind.Create => "StatusCodes.Status201Created",
+            CommandKind.Update => "StatusCodes.Status200OK",
+            _ => "StatusCodes.Status204NoContent",
         };
 
         var endpointModel = new CommandEndpointRenderModel
@@ -134,6 +141,8 @@ public sealed class MediatRAdapter : IFrameworkAdapter
             ContractsNamespace = slice.ContractsNamespace,
             HasContractsUsing = (hasBody || hasResponse) && slice.ContractsNamespace != slice.ApplicationNamespace,
             SuccessExpression = successExpression,
+            SuccessResponseType = hasResponse ? names.Response : null,
+            SuccessStatusCode = successStatusCode,
         };
 
         var files = new List<GeneratedFile>
@@ -258,11 +267,19 @@ public sealed class MediatRAdapter : IFrameworkAdapter
                 ? $"{DispatcherParam}.Send(new {names.Message}(), cancellationToken)"
                 : $"{DispatcherParam}.Send(query, cancellationToken)";
 
+        var pagedResponseType = $"{context.Contracts.RootNamespace}.Common.PagedResponse<{names.Response}>";
+
         var successExpression = query.IsPaged
-            ? "Results.Ok(new { items = result.Value.Items.Select(item => item.ToResponse()).ToList(), result.Value.Page, result.Value.PageSize, result.Value.TotalCount, result.Value.TotalPages, result.Value.HasNextPage, result.Value.HasPreviousPage })"
+            ? $"result.ToOkResponse(value => new {pagedResponseType}(value.Items.Select(item => item.ToResponse()).ToList(), value.Page, value.PageSize, value.TotalCount))"
             : query.IsCollection
-                ? "Results.Ok(result.Value.Select(item => item.ToResponse()).ToList())"
-                : "Results.Ok(result.Value.ToResponse())";
+                ? "result.ToOkResponse(value => value.Select(item => item.ToResponse()).ToList())"
+                : "result.ToOkResponse(value => value.ToResponse())";
+
+        var successResponseType = query.IsPaged
+            ? pagedResponseType
+            : query.IsCollection
+                ? $"IReadOnlyList<{names.Response}>"
+                : names.Response;
 
         var endpointModel = new QueryEndpointRenderModel
         {
@@ -286,6 +303,7 @@ public sealed class MediatRAdapter : IFrameworkAdapter
             ContractsNamespace = slice.ContractsNamespace,
             HasContractsUsing = slice.ContractsNamespace != slice.ApplicationNamespace,
             SuccessExpression = successExpression,
+            SuccessResponseType = successResponseType,
         };
 
         return new[]

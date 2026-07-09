@@ -16,6 +16,7 @@ public sealed class ProductionFoundationTests
     private const string Application = "src/BillingService.Application";
     private const string Domain = "src/BillingService.Domain";
     private const string Infrastructure = "src/BillingService.Infrastructure";
+    private const string Contracts = "src/BillingService.Contracts";
 
     [Theory]
     [InlineData("mediatr")]
@@ -40,7 +41,10 @@ public sealed class ProductionFoundationTests
             $"{Api}/Common/IEndpointDefinition.cs",
             $"{Api}/Common/ExceptionHandlingMiddleware.cs",
             $"{Api}/Common/CorrelationIdMiddleware.cs",
-            $"{Api}/Common/ResultHttpExtensions.cs",
+            $"{Api}/Responses/ApiResponse.cs",
+            $"{Api}/Responses/ApiError.cs",
+            $"{Api}/Results/ResultExtensions.cs",
+            $"{Contracts}/Common/PagedResponse.cs",
             $"{Api}/Common/MiddlewareExtensions.cs",
             $"{Api}/Common/EndpointExtensions.cs",
             $"{Api}/Common/LoggingExtensions.cs",

@@ -61,8 +61,17 @@ public sealed class CommandEndpointRenderModel
     public required bool HasContractsUsing { get; init; }
 
     /// <summary>
-    /// The expression returned when the dispatched Result succeeds — precomputed per operation so
-    /// status-code policy (201 Create / 200 Update / 204 Delete) lives in adapter code, not the template.
+    /// The expression returned when the dispatched Result succeeds or fails — a single
+    /// <c>ResultExtensions</c> call (<c>ToCreatedResponse</c>/<c>ToOkResponse</c>/
+    /// <c>ToNoContentResponse</c>) that already wraps success in <c>ApiResponse&lt;T&gt;</c> and
+    /// routes failure to <c>ToErrorResponse()</c> — precomputed per operation so status-code
+    /// policy (201 Create / 200 Update / 204 Delete) lives in adapter code, not the template.
     /// </summary>
     public required string SuccessExpression { get; init; }
+
+    /// <summary>The response DTO type named in the success ApiResponse&lt;T&gt; Produces() metadata; null for Delete (204, no body).</summary>
+    public string? SuccessResponseType { get; init; }
+
+    /// <summary>The success HTTP status code constant, e.g. "StatusCodes.Status201Created".</summary>
+    public required string SuccessStatusCode { get; init; }
 }

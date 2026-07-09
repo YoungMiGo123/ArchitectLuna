@@ -60,8 +60,13 @@ public sealed class QueryEndpointRenderModel
     public required bool HasContractsUsing { get; init; }
 
     /// <summary>
-    /// The expression returned when the dispatched Result succeeds — precomputed per query shape
-    /// (single item vs collection mapping) so the template stays dumb.
+    /// The expression returned when the dispatched Result succeeds or fails — a single
+    /// <c>ResultExtensions.ToOkResponse</c> call that wraps success in <c>ApiResponse&lt;T&gt;</c>
+    /// and routes failure to <c>ToErrorResponse()</c> — precomputed per query shape (single item
+    /// vs collection vs paged mapping) so the template stays dumb.
     /// </summary>
     public required string SuccessExpression { get; init; }
+
+    /// <summary>The response DTO/collection/paged type named in the success ApiResponse&lt;T&gt; Produces() metadata.</summary>
+    public required string SuccessResponseType { get; init; }
 }

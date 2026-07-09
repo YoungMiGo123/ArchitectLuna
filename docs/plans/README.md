@@ -14,3 +14,4 @@ delete completed plans — they are the design history of the project.
 | 001 | [Production foundation + testing layer](001-production-foundation-and-testing-layer.md) | Done |
 | 002 | [Pagination for generated GetAll queries](002-crud-getall-pagination.md) | Done |
 | 003 | [Runnable persistence + schema init](003-runnable-persistence-and-schema-init.md) | Done |
+| 004 | [Standard response envelope + Controller output](004-standard-response-envelope-and-controllers.md) | In progress |
