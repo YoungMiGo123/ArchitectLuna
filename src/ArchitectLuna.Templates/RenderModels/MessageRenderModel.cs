@@ -8,8 +8,6 @@ public sealed class MessageRenderModel
 {
     public required string Namespace { get; init; }
 
-    public required string RootNamespace { get; init; }
-
     public required string MessageName { get; init; }
 
     public required string HandlerName { get; init; }

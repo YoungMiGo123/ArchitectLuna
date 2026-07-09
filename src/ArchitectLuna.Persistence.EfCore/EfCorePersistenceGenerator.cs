@@ -10,10 +10,19 @@ namespace ArchitectLuna.Persistence.EfCore;
 /// implementation — they differ only in package name and the `UseNpgsql`/`UseSqlServer` call —
 /// so <see cref="EfCoreProviderKind"/> parameterizes rather than duplicating the class.
 ///
-/// Generates, per entity, a plain domain class under Persistence/Entities and an
-/// IEntityTypeConfiguration under Persistence/Configurations; once per solution, a DbContext with
-/// one DbSet per entity. Handler bodies get the DbContext constructor/method-injected (MediatR
-/// via constructor, Wolverine via an extra static-method parameter) and do straightforward
+/// Generates, per entity, a plain domain class under <see cref="GenerationContext.Domain"/>/Entities
+/// and an IEntityTypeConfiguration under <see cref="GenerationContext.Infrastructure"/>/Configurations;
+/// once per solution, a DbContext in Infrastructure with one DbSet per entity. For vertical slice,
+/// Domain and Infrastructure are the same project (a "Persistence" subfolder of the API project), so
+/// this produces exactly the same files/namespaces as before this context became multi-root. For
+/// Clean Architecture, Domain and Infrastructure are genuinely separate projects — Application must
+/// not reference Infrastructure directly, so an <c>I{Solution}DbContext</c> interface is generated
+/// in Application (see <see cref="GenerationContext.HasSeparateInfrastructure"/>) and the concrete
+/// DbContext in Infrastructure implements it; handlers depend on the interface instead of the
+/// concrete type.
+///
+/// Handler bodies get the DbContext (or its interface) constructor/method-injected (MediatR via
+/// constructor, Wolverine via an extra static-method parameter) and do straightforward
 /// Add/Find/Remove/SaveChanges calls — no repository layer, matching the tool's "simplistic"
 /// generated-code philosophy.
 /// </summary>
@@ -36,8 +45,8 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
     {
-        var entityPath = $"{context.ProjectRelativeRoot}/Persistence/Entities/{entity.Name}.cs";
-        var configPath = $"{context.ProjectRelativeRoot}/Persistence/Configurations/{entity.Name}Configuration.cs";
+        var entityPath = $"{context.Domain.ProjectRoot}/Entities/{entity.Name}.cs";
+        var configPath = $"{context.Infrastructure.ProjectRoot}/Configurations/{entity.Name}Configuration.cs";
 
         return new[]
         {
@@ -53,8 +62,19 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
             return Array.Empty<GeneratedFile>();
         }
 
-        var path = $"{context.ProjectRelativeRoot}/Persistence/{DbContextName(context)}.cs";
-        return new[] { new GeneratedFile(path, RenderDbContext(context, entities)) };
+        var files = new List<GeneratedFile>
+        {
+            new($"{context.Infrastructure.ProjectRoot}/{DbContextName(context)}.cs", RenderDbContext(context, entities)),
+        };
+
+        if (context.HasSeparateInfrastructure)
+        {
+            files.Add(new GeneratedFile(
+                $"{context.Application.ProjectRoot}/Persistence/{DbContextInterfaceName(context)}.cs",
+                RenderDbContextInterface(context, entities)));
+        }
+
+        return files;
     }
 
     public HandlerBinding BindCommandHandler(GenerationContext context, FeatureModel feature, EntityModel entity, CommandModel command)
@@ -70,7 +90,7 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
             _ => "throw new NotImplementedException();",
         };
 
-        return new HandlerBinding(body, DbContextName(context), "dbContext", HandlerUsings(context));
+        return new HandlerBinding(body, DependencyTypeName(context), "dbContext", HandlerUsings(context));
     }
 
     public HandlerBinding BindQueryHandler(GenerationContext context, FeatureModel feature, EntityModel entity, QueryModel query)
@@ -82,7 +102,7 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
             ? RenderGetAllBody(entity, resultName, dbSetName)
             : RenderGetByIdBody(entity, resultName, dbSetName);
 
-        return new HandlerBinding(body, DbContextName(context), "dbContext", HandlerUsings(context));
+        return new HandlerBinding(body, DependencyTypeName(context), "dbContext", HandlerUsings(context));
     }
 
     public IReadOnlyList<string> BuildProgramCsRegistration(string solutionName)
@@ -102,17 +122,22 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
 
     private static string DbContextName(GenerationContext context) => $"{context.RootNamespace}DbContext";
 
+    private static string DbContextInterfaceName(GenerationContext context) => $"I{context.RootNamespace}DbContext";
+
+    private static string DependencyTypeName(GenerationContext context) =>
+        context.HasSeparateInfrastructure ? DbContextInterfaceName(context) : DbContextName(context);
+
     private static List<string> HandlerUsings(GenerationContext context) => new()
     {
-        $"{context.RootNamespace}.Persistence",
-        $"{context.RootNamespace}.Persistence.Entities",
+        context.HasSeparateInfrastructure ? $"{context.Application.RootNamespace}.Persistence" : context.Infrastructure.RootNamespace,
+        $"{context.Domain.RootNamespace}.Entities",
         "Microsoft.EntityFrameworkCore",
     };
 
     private static string RenderEntityClass(GenerationContext context, EntityModel entity)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"namespace {context.RootNamespace}.Persistence.Entities;");
+        sb.AppendLine($"namespace {context.Domain.RootNamespace}.Entities;");
         sb.AppendLine();
         sb.AppendLine($"public sealed class {entity.Name}");
         sb.AppendLine("{");
@@ -132,9 +157,9 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         $$"""
         using Microsoft.EntityFrameworkCore;
         using Microsoft.EntityFrameworkCore.Metadata.Builders;
-        using {{context.RootNamespace}}.Persistence.Entities;
+        using {{context.Domain.RootNamespace}}.Entities;
 
-        namespace {{context.RootNamespace}}.Persistence.Configurations;
+        namespace {{context.Infrastructure.RootNamespace}}.Configurations;
 
         public sealed class {{entity.Name}}Configuration : IEntityTypeConfiguration<{{entity.Name}}>
         {
@@ -145,16 +170,45 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         }
         """;
 
+    private static string RenderDbContextInterface(GenerationContext context, IReadOnlyList<EntityReference> entities)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("using Microsoft.EntityFrameworkCore;");
+        sb.AppendLine($"using {context.Domain.RootNamespace}.Entities;");
+        sb.AppendLine();
+        sb.AppendLine($"namespace {context.Application.RootNamespace}.Persistence;");
+        sb.AppendLine();
+        sb.AppendLine($"public interface {DbContextInterfaceName(context)}");
+        sb.AppendLine("{");
+
+        foreach (var reference in entities.DistinctBy(e => e.Entity.Name))
+        {
+            var dbSetName = NamingConventions.Pluralize(reference.Entity.Name);
+            sb.AppendLine($"    DbSet<{reference.Entity.Name}> {dbSetName} {{ get; }}");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);");
+        sb.Append('}');
+        return sb.ToString();
+    }
+
     private static string RenderDbContext(GenerationContext context, IReadOnlyList<EntityReference> entities)
     {
         var dbContextName = DbContextName(context);
         var sb = new StringBuilder();
         sb.AppendLine("using Microsoft.EntityFrameworkCore;");
-        sb.AppendLine($"using {context.RootNamespace}.Persistence.Entities;");
+        sb.AppendLine($"using {context.Domain.RootNamespace}.Entities;");
+        if (context.HasSeparateInfrastructure)
+        {
+            sb.AppendLine($"using {context.Application.RootNamespace}.Persistence;");
+        }
+
         sb.AppendLine();
-        sb.AppendLine($"namespace {context.RootNamespace}.Persistence;");
+        sb.AppendLine($"namespace {context.Infrastructure.RootNamespace};");
         sb.AppendLine();
-        sb.AppendLine($"public sealed class {dbContextName} : DbContext");
+        var baseList = context.HasSeparateInfrastructure ? $"DbContext, {DbContextInterfaceName(context)}" : "DbContext";
+        sb.AppendLine($"public sealed class {dbContextName} : {baseList}");
         sb.AppendLine("{");
         sb.AppendLine($"    public {dbContextName}(DbContextOptions<{dbContextName}> options) : base(options)");
         sb.AppendLine("    {");

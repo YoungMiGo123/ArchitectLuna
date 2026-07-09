@@ -1,5 +1,6 @@
 using {{ dispatcher_using }};
-using {{ root_namespace }}.Common;
+using {{ api_root_namespace }}.Common;
+using {{ message_namespace }};
 
 namespace {{ namespace }};
 

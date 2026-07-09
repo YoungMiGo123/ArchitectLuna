@@ -9,7 +9,15 @@ public sealed class QueryEndpointRenderModel
 {
     public required string Namespace { get; init; }
 
-    public required string RootNamespace { get; init; }
+    /// <summary>The Api project's root namespace — IEndpointDefinition always lives here.</summary>
+    public required string ApiRootNamespace { get; init; }
+
+    /// <summary>
+    /// The message/result types' namespace. Always "using"-ed, even when it equals
+    /// <see cref="Namespace"/> (vertical slice — a same-namespace using is legal, harmless, and
+    /// keeps this template identical across layouts instead of branching on one).
+    /// </summary>
+    public required string MessageNamespace { get; init; }
 
     public required string MessageName { get; init; }
 
