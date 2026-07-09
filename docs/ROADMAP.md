@@ -36,10 +36,8 @@
   `PackAsTool`/`ToolCommandName`/`PackageId`/`Version`/`PackageReadmeFile` set; `dotnet pack` +
   `dotnet tool install --global --add-source ./nupkg architect-luna` verified end to end — bare
   `architect-luna` command, run from an arbitrary directory, scaffolds and generates a real
-  buildable solution. See README's "Installing" section (now also documents publishing to GitHub
-  Packages/NuGet.org so teammates/CI can install without a checkout — the actual `dotnet nuget
-  push` still hasn't been run against a real feed, so "verified end to end" only covers the local
-  `--add-source ./nupkg` path).
+  buildable solution. See README's "Installing" section. Publishing to a real feed is now
+  automated — see the "Automated publish to a real feed" entry below.
 - **A zero-setup `in-memory` persistence provider, made the `new api` default.**
   `ArchitectLuna.Persistence.InMemory` (`InMemoryPersistenceGenerator`) implements
   `IPersistenceGenerator` exactly like EF Core/Marten, but needs no NuGet package and no external
@@ -75,6 +73,13 @@
   configured — plus `Properties/launchSettings.json` and an `appsettings.json`/
   `appsettings.Development.json` split (base file has no secrets; the dev connection string lives
   only in the gitignorable Development file).
+- **Automated publish to a real feed.** `.github/workflows/publish-nuget.yml` packs
+  `architect-luna` and pushes it to the team's Azure Artifacts feed (`Nuget-Packages`,
+  `LoadshednomoConsulting` org) on every push to `master`, with auto-generated versions
+  (`<VERSION_PREFIX>.<run number>`, patch = workflow run number) and a build + fast-test gate.
+  Needs a one-time `AZURE_ARTIFACTS_PAT` repo secret (Azure DevOps PAT, Packaging Read & Write) —
+  setup documented at the top of the workflow file; consumer install documented in README's
+  "Installing" section.
 
 ## Near-term — get to a demoable prototype
 
@@ -94,10 +99,6 @@
 
 - **`SchemaVersion` migration.** `ArchitectModel.SchemaVersion` exists but nothing reads it yet;
   once the YAML shape needs to change, this is what upgrades an older `model.yaml` in place.
-- **Publish the packaged tool to a real feed.** GitHub Packages (natural fit, repo's already
-  there) or NuGet.org, so `dotnet tool install --global architect-luna` works for anyone without
-  a source checkout — see README's "Installing" section for the manual/local-feed version that
-  already works today.
 
 ## Longer-term
 

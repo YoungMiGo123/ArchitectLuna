@@ -1,0 +1,100 @@
+# Publishes the `architect-luna` dotnet-tool package to the team's Azure Artifacts feed on every
+# merge to master — no manual steps. Versions are generated automatically as
+# <VERSION_PREFIX>.<run number>, so each publish is a new, monotonically increasing version and
+# `dotnet tool update --global architect-luna` always sees it as newer.
+#
+# One-time setup (repo admin):
+#   1. In Azure DevOps (LoadshednomoConsulting), create a PAT with the **Packaging → Read & write**
+#      scope, valid for the Nuget-Packages feed.
+#   2. In this GitHub repo: Settings → Secrets and variables → Actions → New repository secret,
+#      name it AZURE_ARTIFACTS_PAT, paste the PAT.
+# That's it — every merge to master after that publishes automatically. Rotate the PAT before it
+# expires (Azure DevOps PATs max out at ~1 year).
+name: Publish NuGet package
+
+on:
+  push:
+    branches: [master]
+  # Manual re-publish escape hatch (e.g. after fixing the PAT secret). Publishing is still fully
+  # automatic on merge; this just allows re-runs without an empty commit.
+  workflow_dispatch:
+
+env:
+  # Bump major/minor here; the patch number is the workflow run number and increments on its own.
+  VERSION_PREFIX: '0.1'
+  FEED_URL: 'https://pkgs.dev.azure.com/LoadshednomoConsulting/_packaging/Nuget-Packages/nuget/v3/index.json'
+
+# One publish at a time, in order — a rapid pair of merges must not race on the feed push.
+concurrency:
+  group: publish-nuget
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Pack & push architect-luna
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Compute version
+        id: version
+        run: |
+          VERSION="${VERSION_PREFIX}.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Publishing architect-luna $VERSION"
+
+      - name: Restore
+        run: dotnet restore ArchitectLuna.sln
+
+      - name: Build
+        run: dotnet build ArchitectLuna.sln --no-restore --configuration Release
+
+      # Fast gate only — the full suite (incl. the slow E2E matrix) already runs on this same
+      # push via ci.yml. This keeps a broken build from shipping without doubling CI time.
+      - name: Test (fast suite)
+        run: dotnet test tests/ArchitectLuna.Core.Tests --no-build --configuration Release
+
+      - name: Pack
+        run: |
+          dotnet pack src/ArchitectLuna.Cli/ArchitectLuna.Cli.csproj \
+            --no-build --configuration Release \
+            -p:Version=${{ steps.version.outputs.version }} \
+            --output ./nupkg
+
+      - name: Push to Azure Artifacts
+        env:
+          AZURE_ARTIFACTS_PAT: ${{ secrets.AZURE_ARTIFACTS_PAT }}
+        run: |
+          if [ -z "$AZURE_ARTIFACTS_PAT" ]; then
+            echo "::error::AZURE_ARTIFACTS_PAT secret is not set. Create an Azure DevOps PAT with Packaging Read & Write scope and add it as a repository secret (see comment at the top of this workflow)."
+            exit 1
+          fi
+          # Azure Artifacts authenticates via the source credential; the --api-key value is
+          # ignored but required by the CLI ("az" by convention, matching `nuget.exe push -ApiKey az`).
+          dotnet nuget add source "$FEED_URL" \
+            --name Nuget-Packages \
+            --username az \
+            --password "$AZURE_ARTIFACTS_PAT" \
+            --store-password-in-clear-text
+          dotnet nuget push ./nupkg/*.nupkg \
+            --source Nuget-Packages \
+            --api-key az \
+            --skip-duplicate
+
+      - name: Publish summary
+        run: |
+          {
+            echo "## architect-luna ${{ steps.version.outputs.version }} published"
+            echo ""
+            echo "Install / update:"
+            echo '```bash'
+            echo "dotnet tool update --global architect-luna --add-source \"$FEED_URL\""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
