@@ -1,6 +1,6 @@
 # Plan 003: Generation quality, entity sync, and database readiness
 
-- **Status:** In progress
+- **Status:** Implemented, E2E verification partly blocked by sandbox network (see Outcome)
 - **Complexity:** L (spans `Core/Generation`, `Core/Model`, both adapters, all three persistence
   providers, the CLI, and the YAML schema)
 - **Author:** Claude (agent)
@@ -249,8 +249,79 @@ scaffolds one API per model — there is no second "service" to document separat
   compound-command prompts). The UI's add-entity form is unaffected; a UI follow-up is a separate,
   smaller change left to `docs/ROADMAP.md`.
 
-## Outcome (fill in at delivery)
+## Outcome
 
-- What shipped, with commit hashes.
-- Deviations from the plan above and why.
-- Follow-ups discovered (add real ones to `docs/ROADMAP.md`).
+All 12 steps shipped (commits `6c41906`..`9c3c0be` on `claude/tool-improvements-kjb8xy`):
+
+1. `6c41906` — field-type-based default validation (`DefaultValidationRules`), plus a
+   `Validator.cs.sbn` whitespace fix (Scriban `~` trim) for the exact blank-line bug shown in
+   §4's "bad output" example.
+2. `fb18284` — `DatabaseSettings`/`DatabaseApplyMode` model schema, `ModelEditor.AddFieldToEntity`.
+3. `c735c76` — `add field`, `update entity --add-field`, `sync entity`, `config set
+   database.applyMode`, and the shared `GenerationRunner` pipeline `generate` and these three now
+   all route through.
+4. `ab2a199` — `DbUpdateConcurrencyException`/`DbUpdateException` handling in the generated
+   exception middleware.
+5. `6a986af` — EF Core `Microsoft.EntityFrameworkCore.Design` package + design-time
+   `{Solution}DbContextFactory`; `IPersistenceGenerator.BuildStartupApplyLines`/
+   `StartupApplyUsings` wired into `Program.cs` for `on-startup`; `dotnet ef database update`
+   best-effort shell-out for `on-generate`; Marten `AutoCreateSchemaObjects` toggle; Docker/compose
+   health checks.
+6. `9c3c0be` — Contracts project removed; DTOs now render into
+   `Application/Features/{Feature}/{Op}/Contracts/` in both layouts; compound-command
+   `--yes`/`--create-missing` prompts on `add entity`/`add crud`; expanded generated README.
+   Auto-formatting (`dotnet format` after `generate`/`new api`, `--no-format`) shipped alongside
+   step 1 in commit `6c41906`'s predecessor work.
+
+**Verification status — partial, and here's exactly why:** `dotnet test tests/ArchitectLuna.Core.Tests`
+(78/78) and `dotnet test tests/ArchitectLuna.Template.Tests` (120/120) are fully green and cover
+every behavior change at the snapshot level, including the Contracts-folder relocation across both
+adapters/layouts/persistence providers, apply-mode Program.cs/AddInfrastructure content, the EF
+Design factory, Docker health checks, and README sections. `dotnet build ArchitectLuna.sln` is
+clean throughout.
+
+The full E2E suite (`ArchitectLuna.EndToEnd.Tests`, which shells out to the real `dotnet` CLI to
+scaffold, `dotnet add package`, and build real solutions) could **not** be fully run in this
+sandbox: every `dotnet add package` call round-trips through this environment's egress proxy, and
+in practice a single Clean Architecture scaffold with real persistence packages (EF Core, Marten)
+took well over the harness's 10-minute per-process timeout — `CleanArchitectureBuildTests` ran for
+92 minutes and still only completed 2 of 5 combinations before three timed out at the transport
+layer, never reaching an actual build or test failure. This is a sandbox-network property, not a
+code defect: the `none`/fast-path combinations that did complete passed, and `--persistence none`
+E2E tests elsewhere in the suite (`GenerationOrderingTests`, the ordering-rule tests) also passed
+earlier in this session. **This repo's own CI** (`.github/workflows/ci.yml`, running on normal
+GitHub-hosted network) is the environment this test tier is designed for and should be treated as
+the authoritative pass/fail signal for the full adapter × persistence × layout matrix on this PR —
+please confirm CI is green (or re-run the full E2E suite from a normal network) before merging.
+Given that constraint, this plan leaned on the fast Core/Template tiers for iteration and used a
+handful of `--persistence none`/`in-memory` E2E runs (fast, package-light) as spot checks during
+development rather than exhaustive-matrix local verification.
+
+**Deviations from the plan:**
+
+- Step 5's exception-middleware change matches `DbUpdateException`/`DbUpdateConcurrencyException`
+  by `ex.GetType().Name` rather than a typed `catch` clause, avoiding the originally-planned
+  per-provider package-reference gating (see the plan's step 5 note) — simpler, same behavior.
+- `ModelValidator` was not changed for `DatabaseSettings` — `DatabaseApplyMode` is a real enum with
+  a safe default (`Manual`), so there's no invalid-value case for the validator to catch that
+  YamlDotNet's own enum deserialization doesn't already reject.
+- The `Contracts/` DTO folder naming keeps the existing `{Op}Request.cs`/`{Op}Response.cs`
+  convention rather than the requirement doc's own inconsistent `{Op}Payload.cs` example — a
+  cosmetic difference, not a functional gap; renaming was out of scope (large blast radius, not
+  explicitly requested as a rename).
+- Grouped-vs-split operation-layout mode (§3.3) was descoped per the plan's "Out of scope" section
+  from the start, not a mid-implementation deviation — flagged below as a follow-up.
+
+**Follow-ups** (added to `docs/ROADMAP.md`):
+
+- §3.3 grouped/split operation-layout flag.
+- Marten `on-generate` apply mode currently behaves like `manual` (no CLI-side equivalent to
+  `dotnet ef database update` exists for Marten without connecting to a live database from the
+  generator itself — flagged as a design tradeoff in step 7, not implemented).
+- `config set database.applyMode`/`--database-apply-mode` changing `on-startup` behavior after the
+  initial scaffold requires a re-scaffold or manual `Program.cs`/`AddInfrastructure` edit, since
+  neither file is regenerated per-feature (documented in `ConfigSetCommand`'s runtime warning and
+  the generated README) — a possible future improvement is a narrower "resync foundation files"
+  command.
+- UI support for `add field`, `config set`, and the compound-command prompts.
+- Run the full E2E matrix from a normal-network environment (or CI) to close out verification.

@@ -114,6 +114,29 @@
   `add query --collection` queries (not CRUD-synthesized) are still unbounded; a typed Contracts
   `PagedResponse<T>` DTO (currently an anonymous object) is a follow-up.
 
+- **Generation quality, entity sync, and database readiness** (plan:
+  `docs/plans/003-generation-quality-and-db-readiness.md`; requirements:
+  `docs/requirements/003-improvements.md`). `add field`/`update entity --add-field` add a field to
+  an existing entity and resync every dependent artifact (persistence config, commands, queries,
+  validators, mappings, handlers) through the same pipeline `generate` uses; `sync entity` and
+  `config set database.applyMode` round out the CLI surface. Field-type-based default validation
+  (`NotEmpty`/`GreaterThan(0)`/`EmailAddress`/etc.) now layers under explicit `--rule` entries
+  instead of validators being 100% explicit-rule-only. Generated output is auto-formatted with
+  `dotnet format` after `generate`/`new api` (`--no-format` to skip). The exception middleware maps
+  `DbUpdateConcurrencyException` to 409 and `DbUpdateException` to a logged 500. EF Core solutions
+  ship `Microsoft.EntityFrameworkCore.Design` and a design-time `DbContext` factory, so `dotnet ef
+  migrations add`/`database update` work out of the box (closing the formerly-tracked "EF Core
+  migrations" near-term item). A new `database.applyMode` (`manual`/`on-generate`/`on-startup`) setting drives EF Core
+  startup migration/`on-generate` `dotnet ef database update` and Marten's
+  `AutoCreateSchemaObjects`. Docker/Compose gained health checks. The separate `Contracts` project
+  is gone — Request/Response DTOs now live in a `Contracts/` subfolder of each Application feature
+  slice in both layouts. `add entity`/`add crud` offer to create a missing feature
+  (`--yes`/`--create-missing` for non-interactive use) instead of just failing. The generated
+  README documents all of the above. Verified via the Core/Template snapshot tiers (198 tests);
+  the full E2E adapter × persistence × layout matrix needs to be re-run/confirmed in CI — this
+  session's sandbox network made `dotnet add package`-heavy E2E runs impractically slow to
+  complete locally (see the plan's Outcome section).
+
 ## Near-term — get to a demoable prototype
 
 - **`invero doctor` / `--verify`.** Run `dotnet build` after `generate` and map errors back to the
@@ -121,12 +144,16 @@
   instead of at the next manual build.
 - **`adapter switch`.** Regenerate an existing model onto a different adapter in place — the
   proof that `IFrameworkAdapter` is a real seam, not just a naming convention.
-- **EF Core migrations.** `dotnet ef migrations add`/`database update` wired into `new api`/
-  `generate` (or documented as a manual follow-up step) — right now a generated `DbContext`
-  compiles but nothing creates the schema. (The new `in-memory` default sidesteps this for a
-  first run, but `efcore-postgres`/`efcore-sqlserver` still need it before they're runnable.)
+- **Grouped/split operation-layout mode** (docs/requirements/003-improvements.md §3.3). Command +
+  handler + result in one file is now the (already-shipped) default; the `split` alternative that
+  breaks them into separate files was descoped from plan 003.
+- **Marten `on-generate` apply mode.** Currently behaves like `manual` — there's no CLI-side
+  equivalent to `dotnet ef database update` for Marten without the generator itself connecting to
+  a live database, which plan 003 deliberately didn't take on.
 - **UI: `--rule` support in the add-entity form.** The CLI's `add entity --rule Field:RuleExpr`
   has no UI equivalent yet (self-disclosed gap from the UI build) — only Name/Type field rows.
+- **UI: `add field`, `config set`, and compound-command support.** New in plan 003; the UI's
+  add-entity form doesn't yet cover any of it.
 
 ## Medium-term
 
