@@ -1,6 +1,6 @@
 # Plan 004: Standard API response envelope + Controller output
 
-- **Status:** In progress
+- **Status:** Done
 - **Complexity:** L (spans the adapter × persistence matrix, changes generated-output shape,
   adds a new CLI-level option)
 - **Author:** Claude
@@ -127,4 +127,30 @@ Controller-based output, selectable via a new `--api-style` flag on `new api` (m
 
 ## Outcome (fill in at delivery)
 
-- TBD.
+- **Shipped**: `ApiResponse<T>`/`ApiError` envelope, centralized `ResultExtensions`
+  (`ToOkResponse`/`ToCreatedResponse`/`ToNoContentResponse`/`ToErrorResponse`/
+  `ToValidationErrorResponse`) for Minimal API, a parallel `ResultActionExtensions` for the new
+  `--api-style controllers`, a typed `PagedResponse<T>` closing the anonymous-paging-object gap
+  from plan 002, OpenAPI `.Produces<ApiResponse<T>>()` metadata, and an enveloped
+  `ExceptionHandlingMiddleware`. All verified across MediatR/Wolverine, Vertical Slice/Clean
+  Architecture, and in-memory/EF Core Postgres/EF Core SQL Server/Marten/none persistence.
+- **Verification**: `dotnet build ArchitectLuna.sln` clean; `ArchitectLuna.Template.Tests`
+  144/144; `ArchitectLuna.Core.Tests` 57/57; `ArchitectLuna.EndToEnd.Tests`
+  `GeneratedSolutionBuildTests` (the adapter × persistence real-`dotnet build` matrix) 12/12; the
+  new `GeneratedSolution_WithControllersApiStyle_Compiles` (MediatR + Wolverine) 2/2. A manual
+  smoke test (scaffold → add feature/entity → generate → build → run → curl full CRUD) confirmed
+  the exact `{ success, payload, error }` JSON shape for both API styles, including a 404 failure
+  response with the correct `ApiError` shape.
+- **Deviations from plan**:
+  - Decision 5 (one controller-with-one-action per operation, literal `Created(location, value)`
+    instead of `CreatedAtAction`) held as designed — no cross-action route lookups needed.
+  - `[Http*]` attributes on controller actions carry the **full absolute route**
+    (e.g. `[HttpPost("/api/invoices")]`) rather than a class-level `[Route]` + relative action
+    route as the requirements doc's illustrative example sketched. This guarantees byte-for-byte
+    URL parity with Minimal API even for custom/non-decomposable routes, and is covered by a route
+    -parity test that generates the same feature under both styles and diffs the route string.
+  - `ResultActionExtensions.cs` is only emitted for `--api-style controllers` solutions (not
+    always emitted) — a solution has exactly one API style, so shipping the unused half would be
+    dead code.
+- **Follow-ups for `docs/ROADMAP.md`** (already added there): `ArchitectLuna.Ui` has no API-style
+  picker yet.
