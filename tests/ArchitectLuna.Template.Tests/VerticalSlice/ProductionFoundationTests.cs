@@ -36,7 +36,10 @@ public sealed class ProductionFoundationTests
             $"{Api}/Common/IEndpointDefinition.cs",
             $"{Api}/Common/ExceptionHandlingMiddleware.cs",
             $"{Api}/Common/CorrelationIdMiddleware.cs",
-            $"{Api}/Common/ResultHttpExtensions.cs",
+            $"{Api}/Responses/ApiResponse.cs",
+            $"{Api}/Responses/ApiError.cs",
+            $"{Api}/Results/ResultExtensions.cs",
+            $"{Api}/Responses/PagedResponse.cs",
             $"{Api}/Common/MiddlewareExtensions.cs",
             $"{Api}/Common/EndpointExtensions.cs",
             $"{Api}/Common/LoggingExtensions.cs",
@@ -67,10 +70,10 @@ public sealed class ProductionFoundationTests
     }
 
     [Fact]
-    public void ResultHttpExtensions_MapEveryErrorTypeToItsStatusCode()
+    public void ResultExtensions_MapEveryErrorTypeToItsStatusCode()
     {
         var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr");
-        var content = GenerationTestHarness.ContentOf(files, $"{Api}/Common/ResultHttpExtensions.cs");
+        var content = GenerationTestHarness.ContentOf(files, $"{Api}/Results/ResultExtensions.cs");
 
         Assert.Contains("ErrorType.Validation => StatusCodes.Status400BadRequest", content);
         Assert.Contains("ErrorType.NotFound => StatusCodes.Status404NotFound", content);
@@ -78,6 +81,50 @@ public sealed class ProductionFoundationTests
         Assert.Contains("ErrorType.Unauthorized => StatusCodes.Status401Unauthorized", content);
         Assert.Contains("ErrorType.Forbidden => StatusCodes.Status403Forbidden", content);
         Assert.Contains("StatusCodes.Status500InternalServerError", content);
+    }
+
+    [Fact]
+    public void ApiResponse_WrapsSuccessAndFailurePayloads()
+    {
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr");
+
+        var response = GenerationTestHarness.ContentOf(files, $"{Api}/Responses/ApiResponse.cs");
+        Assert.Contains("public sealed record ApiResponse<T>(", response);
+        Assert.Contains("bool Success", response);
+        Assert.Contains("T? Payload", response);
+        Assert.Contains("ApiError? Error", response);
+
+        var error = GenerationTestHarness.ContentOf(files, $"{Api}/Responses/ApiError.cs");
+        Assert.Contains("public sealed record ApiError(", error);
+        Assert.Contains("string Code", error);
+        Assert.Contains("string Message", error);
+        Assert.Contains("string Type", error);
+        Assert.Contains("IReadOnlyDictionary<string, string[]>? ValidationErrors", error);
+    }
+
+    [Fact]
+    public void ResultExtensions_CentralizesResultToResponseMapping()
+    {
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr");
+        var content = GenerationTestHarness.ContentOf(files, $"{Api}/Results/ResultExtensions.cs");
+
+        Assert.Contains("public static IResult ToOkResponse<TValue, TResponse>", content);
+        Assert.Contains("public static IResult ToCreatedResponse<TValue, TResponse>", content);
+        Assert.Contains("public static IResult ToNoContentResponse<TValue>", content);
+        Assert.Contains("public static IResult ToErrorResponse(this Result result)", content);
+        Assert.Contains("public static IResult ToValidationErrorResponse(this FluentValidation.Results.ValidationResult validationResult)", content);
+        Assert.Contains("ApiResponse.Success(map(result.Value))", content);
+        Assert.Contains("ApiResponse.Failure<object?>(apiError)", content);
+    }
+
+    [Fact]
+    public void ExceptionHandlingMiddleware_WrapsUnhandledFailuresInTheEnvelope()
+    {
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr");
+        var content = GenerationTestHarness.ContentOf(files, $"{Api}/Common/ExceptionHandlingMiddleware.cs");
+
+        Assert.Contains("ApiResponse.Failure<object?>(error)", content);
+        Assert.DoesNotContain("problem+json", content);
     }
 
     [Fact]

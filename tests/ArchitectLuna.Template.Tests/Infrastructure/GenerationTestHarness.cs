@@ -69,7 +69,7 @@ public static class GenerationTestHarness
 
     /// <summary>Everything one `generate` run would write for the feature: entity persistence + all slices + solution persistence.</summary>
     public static IReadOnlyList<GeneratedFile> GenerateFeature(
-        GenerationContext context, string adapterName, string persistenceName, FeatureModel feature, DatabaseApplyMode applyMode = DatabaseApplyMode.OnStartup)
+        GenerationContext context, string adapterName, string persistenceName, FeatureModel feature, ApiStyle apiStyle = ApiStyle.MinimalApi, DatabaseApplyMode applyMode = DatabaseApplyMode.OnStartup)
     {
         var persistence = Persistence(persistenceName);
         var adapter = Adapter(adapterName, persistence);
@@ -82,12 +82,12 @@ public static class GenerationTestHarness
 
         foreach (var command in feature.Commands)
         {
-            files.AddRange(adapter.GenerateCommand(context, feature, command));
+            files.AddRange(adapter.GenerateCommand(context, feature, command, apiStyle));
         }
 
         foreach (var query in feature.Queries)
         {
-            files.AddRange(adapter.GenerateQuery(context, feature, query));
+            files.AddRange(adapter.GenerateQuery(context, feature, query, apiStyle));
         }
 
         var references = feature.Entities.Select(e => new EntityReference(feature, e)).ToList();

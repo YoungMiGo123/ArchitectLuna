@@ -36,11 +36,17 @@ public sealed class NewApiCommandSettings : CommandSettings
     [Description("When database changes are applied: manual (default), on-generate, or on-startup.")]
     [DefaultValue("manual")]
     public string DatabaseApplyMode { get; init; } = "manual";
+
+    [CommandOption("--api-style")]
+    [Description("How generated endpoints are hosted: minimal-api (default) or controllers.")]
+    [DefaultValue("minimal-api")]
+    public string ApiStyle { get; init; } = "minimal-api";
 }
 
 public sealed class NewApiCommand : Command<NewApiCommandSettings>
 {
     private static readonly string[] KnownArchitectures = { "vertical-slice", "clean-architecture" };
+    private static readonly string[] KnownApiStyles = { "minimal-api", "controllers" };
 
     protected override int Execute(CommandContext context, NewApiCommandSettings settings, CancellationToken cancellationToken)
     {
@@ -62,7 +68,11 @@ public sealed class NewApiCommand : Command<NewApiCommandSettings>
             return 1;
         }
 
-        var layout = settings.Architecture == "clean-architecture" ? SolutionLayout.CleanArchitecture : SolutionLayout.VerticalSlice;
+        if (!KnownApiStyles.Contains(settings.ApiStyle))
+        {
+            AnsiConsole.MarkupLineInterpolated($"[red]Unknown api-style '{settings.ApiStyle}'. Valid values: {string.Join(", ", KnownApiStyles)}.[/]");
+            return 1;
+        }
 
         Core.Model.DatabaseApplyMode applyMode;
         try
@@ -75,8 +85,11 @@ public sealed class NewApiCommand : Command<NewApiCommandSettings>
             return 1;
         }
 
-        var root = SolutionScaffolder.Scaffold(Directory.GetCurrentDirectory(), settings.Name, settings.Adapter, settings.Persistence, layout, format: !settings.NoFormat, applyMode: applyMode);
-        AnsiConsole.MarkupLineInterpolated($"[green]Created {settings.Name} at {root} (adapter: {settings.Adapter}, persistence: {settings.Persistence}, architecture: {settings.Architecture}, database apply mode: {settings.DatabaseApplyMode}).[/]");
+        var layout = settings.Architecture == "clean-architecture" ? SolutionLayout.CleanArchitecture : SolutionLayout.VerticalSlice;
+        var apiStyle = settings.ApiStyle == "controllers" ? ApiStyle.Controllers : ApiStyle.MinimalApi;
+
+        var root = SolutionScaffolder.Scaffold(Directory.GetCurrentDirectory(), settings.Name, settings.Adapter, settings.Persistence, layout, apiStyle, format: !settings.NoFormat, applyMode: applyMode);
+        AnsiConsole.MarkupLineInterpolated($"[green]Created {settings.Name} at {root} (adapter: {settings.Adapter}, persistence: {settings.Persistence}, architecture: {settings.Architecture}, api-style: {settings.ApiStyle}, database apply mode: {settings.DatabaseApplyMode}).[/]");
         return 0;
     }
 }

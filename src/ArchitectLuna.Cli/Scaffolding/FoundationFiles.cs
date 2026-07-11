@@ -23,7 +23,7 @@ public static class FoundationFiles
     /// not here: the provider emits it from GenerateSolutionPersistence so it is regenerated with
     /// full entity knowledge; this only wires the stable `AddInfrastructure` that calls into it.
     /// </summary>
-    public static IReadOnlyList<GeneratedFile> BuildAll(GenerationContext context, string adapterName)
+    public static IReadOnlyList<GeneratedFile> BuildAll(GenerationContext context, string adapterName, ApiStyle apiStyle = ApiStyle.MinimalApi)
     {
         var files = new List<GeneratedFile>
         {
@@ -47,13 +47,24 @@ public static class FoundationFiles
             new($"{context.Api.ProjectRoot}/Common/IEndpointDefinition.cs", BuildEndpointDefinitionInterface(context)),
             new($"{context.Api.ProjectRoot}/Common/ExceptionHandlingMiddleware.cs", BuildExceptionHandlingMiddleware(context)),
             new($"{context.Api.ProjectRoot}/Common/CorrelationIdMiddleware.cs", BuildCorrelationIdMiddleware(context)),
-            new($"{context.Api.ProjectRoot}/Common/ResultHttpExtensions.cs", BuildResultHttpExtensions(context)),
+            new($"{context.Api.ProjectRoot}/Responses/ApiResponse.cs", BuildApiResponse(context)),
+            new($"{context.Api.ProjectRoot}/Responses/ApiError.cs", BuildApiError(context)),
+            new($"{context.Api.ProjectRoot}/Results/ResultExtensions.cs", BuildResultExtensions(context)),
+            new($"{context.Api.ProjectRoot}/Responses/PagedResponse.cs", BuildPagedResponse(context)),
             new($"{context.Api.ProjectRoot}/Common/MiddlewareExtensions.cs", BuildMiddlewareExtensions(context)),
-            new($"{context.Api.ProjectRoot}/Common/EndpointExtensions.cs", BuildEndpointExtensions(context)),
+            new($"{context.Api.ProjectRoot}/Common/EndpointExtensions.cs", BuildEndpointExtensions(context, apiStyle)),
             new($"{context.Api.ProjectRoot}/Common/LoggingExtensions.cs", BuildLoggingExtensions(context)),
             new($"{context.Api.ProjectRoot}/Services/HttpUserContext.cs", BuildHttpUserContext(context)),
-            new($"{context.Api.ProjectRoot}/ApiDependencyInjection.cs", BuildApiDependencyInjection(context)),
+            new($"{context.Api.ProjectRoot}/ApiDependencyInjection.cs", BuildApiDependencyInjection(context, apiStyle)),
         };
+
+        // Controllers style only: IActionResult-returning mirror of ResultExtensions. Not shipped
+        // for Minimal API solutions — a solution has exactly one api-style, so the Minimal-API-only
+        // ResultExtensions.cs above is the one always emitted, and this one only when needed.
+        if (apiStyle == ApiStyle.Controllers)
+        {
+            files.Add(new($"{context.Api.ProjectRoot}/Results/ResultActionExtensions.cs", BuildResultActionExtensions(context)));
+        }
 
         return files;
     }
@@ -325,17 +336,20 @@ public static class FoundationFiles
     public static string BuildExceptionHandlingMiddleware(GenerationContext context) =>
         $$"""
         using FluentValidation;
+        using {{context.Api.RootNamespace}}.Responses;
 
         namespace {{context.Api.RootNamespace}}.Common;
 
         /// <summary>
-        /// Last-resort translation of exceptions to consistent problem+json responses. Normal
-        /// business outcomes flow through the Result pattern, not exceptions — this middleware
-        /// covers hand-written code that throws: FluentValidation's ValidationException becomes
-        /// 400, KeyNotFoundException 404, UnauthorizedAccessException 403, a concurrency conflict
-        /// (matched by type name, not a hard EF Core reference — see below) becomes 409, any other
-        /// database update failure is logged and returned as a safe 500, and anything else
-        /// unhandled is logged and returned as a safe, generic 500.
+        /// Last-resort translation of exceptions to the standard ApiResponse envelope (see
+        /// docs/requirements/004-standards-return-types.md) — every non-empty response, including
+        /// ones this middleware produces, must be wrapped, not just Result-pattern failures.
+        /// Normal business outcomes flow through the Result pattern, not exceptions — this
+        /// middleware covers hand-written code that throws: FluentValidation's ValidationException
+        /// becomes 400, KeyNotFoundException 404, UnauthorizedAccessException 403, a concurrency
+        /// conflict (matched by type name, not a hard EF Core reference — see below) becomes 409,
+        /// any other database update failure is logged and returned as a safe 500, and anything
+        /// else unhandled is logged and returned as a safe, generic 500.
         ///
         /// EF Core's DbUpdateException/DbUpdateConcurrencyException are matched by
         /// <c>ex.GetType().Name</c> instead of a `catch (DbUpdateException ex)` clause: the Api
@@ -366,39 +380,41 @@ public static class FoundationFiles
                     var failures = ex.Errors
                         .GroupBy(e => e.PropertyName)
                         .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray());
-                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                    context.Response.ContentType = "application/problem+json";
-                    await context.Response.WriteAsJsonAsync(new { status = StatusCodes.Status400BadRequest, title = "Validation failed.", errors = failures });
+                    await WriteResponse(context, StatusCodes.Status400BadRequest, new ApiError(
+                        "validation_failed", "One or more validation errors occurred.", "validation", failures));
                 }
                 catch (KeyNotFoundException ex)
                 {
-                    await WriteProblem(context, StatusCodes.Status404NotFound, ex.Message);
+                    await WriteResponse(context, StatusCodes.Status404NotFound, new ApiError("not_found", ex.Message, "not_found"));
                 }
                 catch (UnauthorizedAccessException ex)
                 {
-                    await WriteProblem(context, StatusCodes.Status403Forbidden, ex.Message);
+                    await WriteResponse(context, StatusCodes.Status403Forbidden, new ApiError("forbidden", ex.Message, "forbidden"));
                 }
                 catch (Exception ex) when (ex.GetType().Name == "DbUpdateConcurrencyException")
                 {
-                    await WriteProblem(context, StatusCodes.Status409Conflict, "The record was modified or deleted by another process.");
+                    await WriteResponse(context, StatusCodes.Status409Conflict, new ApiError(
+                        "conflict", "The record was modified or deleted by another process.", "conflict"));
                 }
                 catch (Exception ex) when (ex.GetType().Name == "DbUpdateException")
                 {
                     _logger.LogError(ex, "Database update failed for {Method} {Path}", context.Request.Method, context.Request.Path);
-                    await WriteProblem(context, StatusCodes.Status500InternalServerError, "A database error occurred.");
+                    await WriteResponse(context, StatusCodes.Status500InternalServerError, new ApiError(
+                        "database_error", "A database error occurred.", "unexpected"));
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Unhandled exception for {Method} {Path}", context.Request.Method, context.Request.Path);
-                    await WriteProblem(context, StatusCodes.Status500InternalServerError, "An unexpected error occurred.");
+                    await WriteResponse(context, StatusCodes.Status500InternalServerError, new ApiError(
+                        "unexpected", "An unexpected error occurred.", "unexpected"));
                 }
             }
 
-            private static Task WriteProblem(HttpContext context, int statusCode, string message)
+            private static Task WriteResponse(HttpContext context, int statusCode, ApiError error)
             {
                 context.Response.StatusCode = statusCode;
-                context.Response.ContentType = "application/problem+json";
-                return context.Response.WriteAsJsonAsync(new { status = statusCode, title = message });
+                context.Response.ContentType = "application/json";
+                return context.Response.WriteAsJsonAsync(ApiResponse.Failure<object?>(error));
             }
         }
         """;
@@ -442,41 +458,230 @@ public static class FoundationFiles
         }
         """;
 
-    public static string BuildResultHttpExtensions(GenerationContext context) =>
+    /// <summary>
+    /// The standard external response envelope (see docs/requirements/004-standards-return-types.md):
+    /// every non-empty API response — Minimal API or Controller — wraps its body in this so a
+    /// client never has to guess the shape. Internal <see cref="Result{T}"/> is never returned
+    /// directly; <see cref="ResultExtensions"/> is the one place that translates one into the other.
+    /// </summary>
+    public static string BuildApiResponse(GenerationContext context) =>
+        $$"""
+        namespace {{context.Api.RootNamespace}}.Responses;
+
+        public sealed record ApiResponse<T>(
+            bool Success,
+            T? Payload,
+            ApiError? Error);
+
+        public static class ApiResponse
+        {
+            public static ApiResponse<T> Success<T>(T payload) => new(true, payload, null);
+
+            public static ApiResponse<T> Failure<T>(ApiError error) => new(false, default, error);
+        }
+        """;
+
+    public static string BuildApiError(GenerationContext context) =>
+        $$"""
+        namespace {{context.Api.RootNamespace}}.Responses;
+
+        public sealed record ApiError(
+            string Code,
+            string Message,
+            string Type,
+            IReadOnlyDictionary<string, string[]>? ValidationErrors = null);
+        """;
+
+    /// <summary>
+    /// The one place a <see cref="Result"/> becomes an HTTP response, so every endpoint maps
+    /// success/failure identically: success wraps the mapped payload in
+    /// <c>ApiResponse&lt;T&gt;</c>; failure maps Validation→400, NotFound→404, Conflict→409,
+    /// Unauthorized→401, Forbidden→403, Unexpected→500, all as <c>ApiResponse&lt;object?&gt;</c>.
+    /// Generated endpoints call these instead of constructing response envelopes themselves.
+    /// </summary>
+    public static string BuildResultExtensions(GenerationContext context) =>
         $$"""
         using {{context.Application.RootNamespace}}.Common.Results;
+        using {{context.Api.RootNamespace}}.Responses;
 
-        namespace {{context.Api.RootNamespace}}.Common;
+        namespace {{context.Api.RootNamespace}}.Results;
 
-        /// <summary>
-        /// The one place a failed <c>Result</c> becomes an HTTP response, so every endpoint maps
-        /// errors identically: Validation→400, NotFound→404, Conflict→409, Unauthorized→401,
-        /// Forbidden→403, Unexpected→500.
-        /// </summary>
-        public static class ResultHttpExtensions
+        public static class ResultExtensions
         {
-            public static IResult ToProblem(this Result result)
+            public static IResult ToOkResponse<TValue, TResponse>(this Result<TValue> result, Func<TValue, TResponse> map)
+            {
+                return result.IsSuccess
+                    ? Microsoft.AspNetCore.Http.Results.Ok(ApiResponse.Success(map(result.Value)))
+                    : result.ToErrorResponse();
+            }
+
+            public static IResult ToCreatedResponse<TValue, TResponse>(
+                this Result<TValue> result,
+                Func<TValue, string> location,
+                Func<TValue, TResponse> map)
+            {
+                return result.IsSuccess
+                    ? Microsoft.AspNetCore.Http.Results.Created(location(result.Value), ApiResponse.Success(map(result.Value)))
+                    : result.ToErrorResponse();
+            }
+
+            public static IResult ToNoContentResponse<TValue>(this Result<TValue> result)
+            {
+                return result.IsSuccess
+                    ? Microsoft.AspNetCore.Http.Results.NoContent()
+                    : result.ToErrorResponse();
+            }
+
+            public static IResult ToErrorResponse(this Result result)
             {
                 if (result.IsSuccess)
                 {
-                    throw new InvalidOperationException("Cannot convert a successful result to a problem response.");
+                    throw new InvalidOperationException("Cannot convert a successful result to an error response.");
                 }
 
                 var error = result.Error!;
-                var statusCode = error.Type switch
-                {
-                    ErrorType.Validation => StatusCodes.Status400BadRequest,
-                    ErrorType.NotFound => StatusCodes.Status404NotFound,
-                    ErrorType.Conflict => StatusCodes.Status409Conflict,
-                    ErrorType.Unauthorized => StatusCodes.Status401Unauthorized,
-                    ErrorType.Forbidden => StatusCodes.Status403Forbidden,
-                    _ => StatusCodes.Status500InternalServerError,
-                };
+                var apiError = new ApiError(error.Code, error.Message, ToErrorType(error.Type), (error as ValidationError)?.Failures);
 
                 // Fully qualified: this class's own namespace has a sibling "Results" *namespace*
                 // (the Result pattern types), which shadows ASP.NET's Results class here.
-                return Microsoft.AspNetCore.Http.Results.Problem(title: error.Code, detail: error.Message, statusCode: statusCode);
+                return Microsoft.AspNetCore.Http.Results.Json(ApiResponse.Failure<object?>(apiError), statusCode: ToStatusCode(error.Type));
             }
+
+            public static IResult ToValidationErrorResponse(this FluentValidation.Results.ValidationResult validationResult)
+            {
+                var failures = validationResult.Errors
+                    .GroupBy(failure => failure.PropertyName)
+                    .ToDictionary(group => group.Key, group => group.Select(failure => failure.ErrorMessage).ToArray());
+
+                var apiError = new ApiError("validation_failed", "One or more validation errors occurred.", "validation", failures);
+                return Microsoft.AspNetCore.Http.Results.Json(ApiResponse.Failure<object?>(apiError), statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            private static int ToStatusCode(ErrorType type) => type switch
+            {
+                ErrorType.Validation => StatusCodes.Status400BadRequest,
+                ErrorType.NotFound => StatusCodes.Status404NotFound,
+                ErrorType.Conflict => StatusCodes.Status409Conflict,
+                ErrorType.Unauthorized => StatusCodes.Status401Unauthorized,
+                ErrorType.Forbidden => StatusCodes.Status403Forbidden,
+                _ => StatusCodes.Status500InternalServerError,
+            };
+
+            private static string ToErrorType(ErrorType type) => type switch
+            {
+                ErrorType.Validation => "validation",
+                ErrorType.NotFound => "not_found",
+                ErrorType.Conflict => "conflict",
+                ErrorType.Unauthorized => "unauthorized",
+                ErrorType.Forbidden => "forbidden",
+                _ => "unexpected",
+            };
+        }
+        """;
+
+    /// <summary>
+    /// The Controllers-style mirror of <see cref="BuildResultExtensions"/> — same success/failure
+    /// mapping (200/201/204 on success; Validation→400, NotFound→404, Conflict→409,
+    /// Unauthorized→401, Forbidden→403, Unexpected→500 on failure), but every method returns
+    /// <see cref="Microsoft.AspNetCore.Mvc.IActionResult"/> instead of <see cref="IResult"/> so
+    /// generated controller actions can return it directly. Only emitted for
+    /// <see cref="ApiStyle.Controllers"/> solutions.
+    /// </summary>
+    public static string BuildResultActionExtensions(GenerationContext context) =>
+        $$"""
+        using Microsoft.AspNetCore.Mvc;
+        using {{context.Application.RootNamespace}}.Common.Results;
+        using {{context.Api.RootNamespace}}.Responses;
+
+        namespace {{context.Api.RootNamespace}}.Results;
+
+        public static class ResultActionExtensions
+        {
+            public static IActionResult ToOkActionResponse<TValue, TResponse>(this Result<TValue> result, Func<TValue, TResponse> map)
+            {
+                return result.IsSuccess
+                    ? new OkObjectResult(ApiResponse.Success(map(result.Value)))
+                    : result.ToErrorActionResponse();
+            }
+
+            public static IActionResult ToCreatedActionResponse<TValue, TResponse>(
+                this Result<TValue> result,
+                Func<TValue, string> location,
+                Func<TValue, TResponse> map)
+            {
+                return result.IsSuccess
+                    ? new CreatedResult(location(result.Value), ApiResponse.Success(map(result.Value)))
+                    : result.ToErrorActionResponse();
+            }
+
+            public static IActionResult ToNoContentActionResponse<TValue>(this Result<TValue> result)
+            {
+                return result.IsSuccess
+                    ? new NoContentResult()
+                    : result.ToErrorActionResponse();
+            }
+
+            public static IActionResult ToErrorActionResponse(this Result result)
+            {
+                if (result.IsSuccess)
+                {
+                    throw new InvalidOperationException("Cannot convert a successful result to an error response.");
+                }
+
+                var error = result.Error!;
+                var apiError = new ApiError(error.Code, error.Message, ToErrorType(error.Type), (error as ValidationError)?.Failures);
+
+                return new ObjectResult(ApiResponse.Failure<object?>(apiError)) { StatusCode = ToStatusCode(error.Type) };
+            }
+
+            public static IActionResult ToValidationActionErrorResponse(this FluentValidation.Results.ValidationResult validationResult)
+            {
+                var failures = validationResult.Errors
+                    .GroupBy(failure => failure.PropertyName)
+                    .ToDictionary(group => group.Key, group => group.Select(failure => failure.ErrorMessage).ToArray());
+
+                var apiError = new ApiError("validation_failed", "One or more validation errors occurred.", "validation", failures);
+                return new ObjectResult(ApiResponse.Failure<object?>(apiError)) { StatusCode = StatusCodes.Status400BadRequest };
+            }
+
+            private static int ToStatusCode(ErrorType type) => type switch
+            {
+                ErrorType.Validation => StatusCodes.Status400BadRequest,
+                ErrorType.NotFound => StatusCodes.Status404NotFound,
+                ErrorType.Conflict => StatusCodes.Status409Conflict,
+                ErrorType.Unauthorized => StatusCodes.Status401Unauthorized,
+                ErrorType.Forbidden => StatusCodes.Status403Forbidden,
+                _ => StatusCodes.Status500InternalServerError,
+            };
+
+            private static string ToErrorType(ErrorType type) => type switch
+            {
+                ErrorType.Validation => "validation",
+                ErrorType.NotFound => "not_found",
+                ErrorType.Conflict => "conflict",
+                ErrorType.Unauthorized => "unauthorized",
+                ErrorType.Forbidden => "forbidden",
+                _ => "unexpected",
+            };
+        }
+        """;
+
+    /// <summary>
+    /// Typed replacement for the anonymous paging object GetAll queries used to return — needed so
+    /// OpenAPI can describe <c>ApiResponse&lt;PagedResponse&lt;T&gt;&gt;</c> instead of an anonymous
+    /// shape. Mirrors <see cref="BuildPagedResult"/>'s computed properties.
+    /// </summary>
+    public static string BuildPagedResponse(GenerationContext context) =>
+        $$"""
+        namespace {{context.Api.RootNamespace}}.Responses;
+
+        public sealed record PagedResponse<T>(IReadOnlyList<T> Items, int Page, int PageSize, long TotalCount)
+        {
+            public int TotalPages => PageSize <= 0 ? 0 : (int)Math.Ceiling(TotalCount / (double)PageSize);
+
+            public bool HasNextPage => Page < TotalPages;
+
+            public bool HasPreviousPage => Page > 1;
         }
         """;
 
@@ -505,8 +710,25 @@ public static class FoundationFiles
         }
         """;
 
-    public static string BuildEndpointExtensions(GenerationContext context) =>
-        $$"""
+    public static string BuildEndpointExtensions(GenerationContext context, ApiStyle apiStyle = ApiStyle.MinimalApi)
+    {
+        // Controllers style: routing goes through ASP.NET's controller discovery
+        // (MapControllers()), not the IEndpointDefinition reflection scan — a controllers-mode
+        // solution has zero IEndpointDefinition types, so that scan would be a harmless no-op,
+        // but gating it behind the style keeps the emitted code honest about what it actually uses.
+        var mapEndpoints = apiStyle == ApiStyle.Controllers
+            ? "        app.MapControllers();\n"
+            : """
+                    foreach (var endpointType in typeof(EndpointExtensions).Assembly.GetTypes()
+                        .Where(t => typeof(IEndpointDefinition).IsAssignableFrom(t) && t is { IsAbstract: false, IsInterface: false }))
+                    {
+                        var endpoint = (IEndpointDefinition)Activator.CreateInstance(endpointType)!;
+                        endpoint.Map(app);
+                    }
+
+            """;
+
+        return $$"""
         using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
         namespace {{context.Api.RootNamespace}}.Common;
@@ -514,27 +736,22 @@ public static class FoundationFiles
         public static class EndpointExtensions
         {
             /// <summary>
-            /// Maps the health probes plus every discovered <see cref="IEndpointDefinition"/> — adding
-            /// a feature never edits Program.cs. Liveness (<c>/health</c>) reports the process is up;
-            /// readiness (<c>/health/ready</c>) runs the DB-tagged checks so an orchestrator can tell
-            /// "started" from "can actually serve traffic".
+            /// Maps the health probes plus every generated endpoint — adding a feature never edits
+            /// Program.cs. Liveness (<c>/health</c>) reports the process is up; readiness
+            /// (<c>/health/ready</c>) runs the DB-tagged checks so an orchestrator can tell "started"
+            /// from "can actually serve traffic".
             /// </summary>
             public static WebApplication MapApiEndpoints(this WebApplication app)
             {
                 app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false });
                 app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") });
 
-                foreach (var endpointType in typeof(EndpointExtensions).Assembly.GetTypes()
-                    .Where(t => typeof(IEndpointDefinition).IsAssignableFrom(t) && t is { IsAbstract: false, IsInterface: false }))
-                {
-                    var endpoint = (IEndpointDefinition)Activator.CreateInstance(endpointType)!;
-                    endpoint.Map(app);
-                }
-
+        {{mapEndpoints}}
                 return app;
             }
         }
         """;
+    }
 
     public static string BuildLoggingExtensions(GenerationContext context) =>
         $$"""
@@ -590,8 +807,16 @@ public static class FoundationFiles
         }
         """;
 
-    public static string BuildApiDependencyInjection(GenerationContext context) =>
-        $$"""
+    public static string BuildApiDependencyInjection(GenerationContext context, ApiStyle apiStyle = ApiStyle.MinimalApi)
+    {
+        // Controllers style needs MVC's controller services registered so generated
+        // [ApiController] classes are discovered and their action results/model binding work;
+        // Minimal API's IEndpointDefinition scan needs no framework registration at all.
+        var controllerRegistration = apiStyle == ApiStyle.Controllers
+            ? "        services.AddControllers();\n"
+            : string.Empty;
+
+        return $$"""
         using {{context.Application.RootNamespace}}.Common.Abstractions;
         using {{context.Api.RootNamespace}}.Services;
 
@@ -602,7 +827,7 @@ public static class FoundationFiles
         {
             public static IServiceCollection AddApi(this IServiceCollection services, IConfiguration configuration)
             {
-                services.AddEndpointsApiExplorer();
+        {{controllerRegistration}}        services.AddEndpointsApiExplorer();
                 services.AddSwaggerGen();
                 services.AddHealthChecks();
                 services.AddHttpContextAccessor();
@@ -611,4 +836,5 @@ public static class FoundationFiles
             }
         }
         """;
+    }
 }

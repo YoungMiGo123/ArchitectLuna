@@ -1,0 +1,60 @@
+using FluentValidation;
+using Microsoft.AspNetCore.Mvc;
+using {{ dispatcher_using }};
+using {{ api_root_namespace }}.Responses;
+using {{ api_root_namespace }}.Results;
+using {{ message_namespace }};
+using {{ results_namespace }};
+{{ if has_contracts_using }}
+using {{ contracts_namespace }};
+{{ end }}
+
+namespace {{ namespace }};
+
+[ApiController]
+public sealed class {{ controller_name }} : ControllerBase
+{
+    [{{ http_attribute }}("{{ route }}")]
+    {{ if success_response_type }}
+    [ProducesResponseType(typeof(ApiResponse<{{ success_response_type }}>), {{ success_status_code }})]
+    {{ else }}
+    [ProducesResponseType({{ success_status_code }})]
+    {{ end }}
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status500InternalServerError)]
+    {{ if has_route_id && has_body }}
+    public async Task<IActionResult> Handle(Guid id, {{ request_name }} request, IValidator<{{ message_name }}> validator, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken)
+    {
+        var command = request.ToCommand(id);
+        var validationResult = await validator.ValidateAsync(command, cancellationToken);
+        if (!validationResult.IsValid)
+        {
+            return validationResult.ToValidationActionErrorResponse();
+        }
+
+        var result = await {{ dispatch_call }};
+        return {{ success_expression }};
+    }
+    {{ else if has_route_id }}
+    public async Task<IActionResult> Handle(Guid id, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken)
+    {
+        var result = await {{ dispatch_call }};
+        return {{ success_expression }};
+    }
+    {{ else }}
+    public async Task<IActionResult> Handle({{ request_name }} request, IValidator<{{ message_name }}> validator, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken)
+    {
+        var command = request.ToCommand();
+        var validationResult = await validator.ValidateAsync(command, cancellationToken);
+        if (!validationResult.IsValid)
+        {
+            return validationResult.ToValidationActionErrorResponse();
+        }
+
+        var result = await {{ dispatch_call }};
+        return {{ success_expression }};
+    }
+    {{ end }}
+}

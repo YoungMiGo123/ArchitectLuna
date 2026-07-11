@@ -251,12 +251,33 @@ slice per command/query. Where those files land depends on `--architecture`:
 | GetAll | `GET /api/invoices?page=&pageSize=` | `200 OK` (paged) | Query, Result (wrapped as `PagedResult<T>`), Response, Handler, Mappings, Endpoint |
 
 Handlers return `Result<T>` — not-found, conflict, and validation outcomes are values, not
-exceptions — and every endpoint maps failures through one shared `ToProblem()` extension:
-Validation→400, NotFound→404, Conflict→409, Unauthorized→401, Forbidden→403, anything else→500.
-Mappings are explicit generated extension methods (`request.ToCommand()`, `result.ToResponse()`)
-— no mapping library. `GetAll` is paged out of the box: it binds `?page=&pageSize=` from the query
-string (defaults 1/20, capped) and returns a `PagedResult<T>` carrying `page`, `pageSize`,
-`totalCount`, and computed `totalPages`/`hasNextPage`/`hasPreviousPage`.
+exceptions — but that internal `Result<T>` is never returned to a client directly. Every endpoint
+maps it through centralized `ResultExtensions` (`src/{Solution}.Api/Results/ResultExtensions.cs`:
+`ToOkResponse`/`ToCreatedResponse`/`ToNoContentResponse`/`ToErrorResponse`/
+`ToValidationErrorResponse`) into the standard external envelope
+(`src/{Solution}.Api/Responses/ApiResponse.cs`/`ApiError.cs`, see
+`docs/requirements/004-standards-return-types.md`):
+
+```json
+{ "success": true, "payload": { "...": "..." }, "error": null }
+```
+
+or on failure:
+
+```json
+{ "success": false, "payload": null, "error": { "code": "not_found", "message": "...", "type": "not_found", "validationErrors": null } }
+```
+
+Failure status codes: Validation→400, NotFound→404, Conflict→409, Unauthorized→401, Forbidden→403,
+anything else→500 — the same mapping regardless of adapter, persistence provider, or `--api-style`.
+Endpoints never hand-construct a response envelope; they call one `ResultExtensions` method and
+return its result. OpenAPI metadata documents the envelope (`.Produces<ApiResponse<T>>(...)`), not
+the raw response DTO. Mappings are explicit generated extension methods (`request.ToCommand()`,
+`result.ToResponse()`) — no mapping library. `GetAll` is paged out of the box: it binds
+`?page=&pageSize=` from the query string (defaults 1/20, capped) and returns a typed
+`PagedResponse<T>` (`src/{Solution}.Contracts/Common/PagedResponse.cs`) carrying `items`, `page`,
+`pageSize`, `totalCount`, and computed `totalPages`/`hasNextPage`/`hasPreviousPage`, wrapped in the
+same `ApiResponse<T>` envelope.
 
 ### Runnable against a real database, immediately
 

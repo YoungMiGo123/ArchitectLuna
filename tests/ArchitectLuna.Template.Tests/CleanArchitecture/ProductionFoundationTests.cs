@@ -40,7 +40,10 @@ public sealed class ProductionFoundationTests
             $"{Api}/Common/IEndpointDefinition.cs",
             $"{Api}/Common/ExceptionHandlingMiddleware.cs",
             $"{Api}/Common/CorrelationIdMiddleware.cs",
-            $"{Api}/Common/ResultHttpExtensions.cs",
+            $"{Api}/Responses/ApiResponse.cs",
+            $"{Api}/Responses/ApiError.cs",
+            $"{Api}/Results/ResultExtensions.cs",
+            $"{Api}/Responses/PagedResponse.cs",
             $"{Api}/Common/MiddlewareExtensions.cs",
             $"{Api}/Common/EndpointExtensions.cs",
             $"{Api}/Common/LoggingExtensions.cs",
@@ -112,6 +115,16 @@ public sealed class ProductionFoundationTests
         Assert.Contains("services.AddDbContext<BillingServiceDbContext>", content);
         Assert.Contains("services.AddScoped<IBillingServiceDbContext>(sp => sp.GetRequiredService<BillingServiceDbContext>())", content);
         Assert.Contains("services.AddHostedService<DatabaseInitializer>();", content);
+    }
+
+    [Fact]
+    public void ExceptionHandlingMiddleware_WrapsUnhandledFailuresInTheEnvelope()
+    {
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.CleanArchitectureContext(), "mediatr");
+        var content = GenerationTestHarness.ContentOf(files, $"{Api}/Common/ExceptionHandlingMiddleware.cs");
+
+        Assert.Contains("ApiResponse.Failure<object?>(error)", content);
+        Assert.DoesNotContain("problem+json", content);
     }
 
     [Fact]

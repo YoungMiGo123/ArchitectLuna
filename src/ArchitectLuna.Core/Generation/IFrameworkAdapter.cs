@@ -13,9 +13,9 @@ public interface IFrameworkAdapter
     /// </summary>
     string Name { get; }
 
-    IReadOnlyList<GeneratedFile> GenerateCommand(GenerationContext context, FeatureModel feature, CommandModel command);
+    IReadOnlyList<GeneratedFile> GenerateCommand(GenerationContext context, FeatureModel feature, CommandModel command, ApiStyle apiStyle = ApiStyle.MinimalApi);
 
-    IReadOnlyList<GeneratedFile> GenerateQuery(GenerationContext context, FeatureModel feature, QueryModel query);
+    IReadOnlyList<GeneratedFile> GenerateQuery(GenerationContext context, FeatureModel feature, QueryModel query, ApiStyle apiStyle = ApiStyle.MinimalApi);
 
     /// <summary>
     /// NuGet package IDs the generated API project must reference for this adapter's output to compile.

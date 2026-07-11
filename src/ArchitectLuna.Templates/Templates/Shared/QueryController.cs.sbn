@@ -1,0 +1,40 @@
+using Microsoft.AspNetCore.Mvc;
+using {{ dispatcher_using }};
+using {{ api_root_namespace }}.Responses;
+using {{ api_root_namespace }}.Results;
+using {{ message_namespace }};
+using {{ results_namespace }};
+{{ if has_contracts_using }}
+using {{ contracts_namespace }};
+{{ end }}
+
+namespace {{ namespace }};
+
+[ApiController]
+public sealed class {{ controller_name }} : ControllerBase
+{
+    [HttpGet("{{ route }}")]
+    [ProducesResponseType(typeof(ApiResponse<{{ success_response_type }}>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status500InternalServerError)]
+    {{ if is_single_route_param }}
+    public async Task<IActionResult> Handle({{ route_param_type }} {{ route_param_name }}, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken)
+    {
+        var result = await {{ dispatch_call }};
+        return {{ success_expression }};
+    }
+    {{ else if is_zero_param }}
+    public async Task<IActionResult> Handle({{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken)
+    {
+        var result = await {{ dispatch_call }};
+        return {{ success_expression }};
+    }
+    {{ else }}
+    public async Task<IActionResult> Handle([FromQuery] {{ message_name }} query, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken)
+    {
+        var result = await {{ dispatch_call }};
+        return {{ success_expression }};
+    }
+    {{ end }}
+}

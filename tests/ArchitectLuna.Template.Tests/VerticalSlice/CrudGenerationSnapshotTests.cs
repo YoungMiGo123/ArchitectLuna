@@ -69,14 +69,20 @@ public sealed class CrudGenerationSnapshotTests
         var files = GenerationTestHarness.GenerateFeature(
             GenerationTestHarness.VerticalSliceContext(), adapter, "in-memory", GenerationTestHarness.InvoiceFeature());
 
-        Assert.Contains("Results.Created(", GenerationTestHarness.ContentOf(files, $"{Features}/CreateInvoice/CreateInvoiceEndpoint.cs"));
-        Assert.Contains("Results.Ok(result.Value.ToResponse())", GenerationTestHarness.ContentOf(files, $"{Features}/UpdateInvoice/UpdateInvoiceEndpoint.cs"));
-        Assert.Contains("Results.NoContent()", GenerationTestHarness.ContentOf(files, $"{Features}/DeleteInvoice/DeleteInvoiceEndpoint.cs"));
-        Assert.Contains("Results.Ok(new { items = result.Value.Items.Select(item => item.ToResponse()).ToList(), result.Value.Page, result.Value.PageSize, result.Value.TotalCount, result.Value.TotalPages, result.Value.HasNextPage, result.Value.HasPreviousPage })", GenerationTestHarness.ContentOf(files, $"{Features}/GetAllInvoices/GetAllInvoicesEndpoint.cs"));
+        Assert.Contains("result.ToCreatedResponse(value => $\"/api/invoices/{value.Id}\", value => value.ToResponse())", GenerationTestHarness.ContentOf(files, $"{Features}/CreateInvoice/CreateInvoiceEndpoint.cs"));
+        Assert.Contains("result.ToOkResponse(value => value.ToResponse())", GenerationTestHarness.ContentOf(files, $"{Features}/UpdateInvoice/UpdateInvoiceEndpoint.cs"));
+        Assert.Contains("result.ToNoContentResponse()", GenerationTestHarness.ContentOf(files, $"{Features}/DeleteInvoice/DeleteInvoiceEndpoint.cs"));
+        Assert.Contains("result.ToOkResponse(value => new", GenerationTestHarness.ContentOf(files, $"{Features}/GetAllInvoices/GetAllInvoicesEndpoint.cs"));
 
+        // Every endpoint centralizes both success and failure through ResultExtensions and never
+        // hand-constructs an ApiResponse/problem response itself.
         foreach (var operation in new[] { "CreateInvoice", "UpdateInvoice", "DeleteInvoice", "GetInvoiceById", "GetAllInvoices" })
         {
-            Assert.Contains("result.ToProblem()", GenerationTestHarness.ContentOf(files, $"{Features}/{operation}/{operation}Endpoint.cs"));
+            var endpoint = GenerationTestHarness.ContentOf(files, $"{Features}/{operation}/{operation}Endpoint.cs");
+            Assert.Contains("ApiResponse<", endpoint);
+            Assert.DoesNotContain("new ApiResponse<", endpoint);
+            Assert.DoesNotContain("result.ToProblem()", endpoint);
+            Assert.DoesNotContain("Results.Problem(", endpoint);
         }
     }
 
@@ -124,9 +130,10 @@ public sealed class CrudGenerationSnapshotTests
         Assert.Contains("Skip((page - 1) * pageSize).Take(pageSize)", handler);
 
         var endpoint = GenerationTestHarness.ContentOf(files, $"{Features}/GetAllInvoices/GetAllInvoicesEndpoint.cs");
-        // Collection route preserved; page/pageSize bound via [AsParameters]; paging envelope in the response.
+        // Collection route preserved; page/pageSize bound via [AsParameters]; paging maps into a typed PagedResponse<T>.
         Assert.Contains("MapGet(\"/api/invoices\"", endpoint);
-        Assert.Contains("result.Value.TotalCount", endpoint);
+        Assert.Contains("new BillingService.Responses.PagedResponse<GetAllInvoicesResponse>", endpoint);
+        Assert.Contains("value.Page, value.PageSize, value.TotalCount", endpoint);
     }
 
     [Theory]

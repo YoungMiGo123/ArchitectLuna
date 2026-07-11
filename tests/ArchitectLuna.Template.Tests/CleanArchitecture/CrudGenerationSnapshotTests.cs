@@ -88,10 +88,11 @@ public sealed class CrudGenerationSnapshotTests
         Assert.Contains("using BillingService.Application.Features.Invoices.CreateInvoice.Contracts;", create);
         Assert.Contains("CreateInvoiceRequest request", create);
         Assert.Contains("request.ToCommand()", create);
-        Assert.Contains("Results.Created(", create);
+        Assert.Contains("result.ToCreatedResponse(", create);
+        Assert.Contains("ApiResponse<CreateInvoiceResponse>", create);
 
         var delete = GenerationTestHarness.ContentOf(files, $"{Api}/Features/Invoices/DeleteInvoice/DeleteInvoiceEndpoint.cs");
-        Assert.Contains("Results.NoContent()", delete);
-        Assert.Contains("result.ToProblem()", delete);
+        Assert.Contains("result.ToNoContentResponse()", delete);
+        Assert.DoesNotContain("result.ToProblem()", delete);
     }
 }
