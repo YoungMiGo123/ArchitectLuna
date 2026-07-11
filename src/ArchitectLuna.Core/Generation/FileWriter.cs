@@ -9,6 +9,8 @@ namespace ArchitectLuna.Core.Generation;
 /// </summary>
 public static class FileWriter
 {
+    private const string RegionKeySeparator = "::";
+
     public static void Write(string rootDirectory, GeneratedFile file, GenerationManifest manifest)
     {
         var fullPath = Path.Combine(rootDirectory, file.RelativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -19,8 +21,21 @@ public static class FileWriter
         }
 
         var existingContent = File.Exists(fullPath) ? File.ReadAllText(fullPath) : null;
-        var merged = ProtectedRegionMerger.Merge(file.Content, existingContent);
-        File.WriteAllText(fullPath, merged);
+
+        // Scope the known-hash lookup to this file's own regions (keys are
+        // "{relativePath}::{regionName}" — see ProtectedRegionMerger.MergeTracked's doc comment).
+        var keyPrefix = file.RelativePath + RegionKeySeparator;
+        var knownHashes = manifest.RegionHashes
+            .Where(kv => kv.Key.StartsWith(keyPrefix, StringComparison.Ordinal))
+            .ToDictionary(kv => kv.Key[keyPrefix.Length..], kv => kv.Value, StringComparer.Ordinal);
+
+        var result = ProtectedRegionMerger.MergeTracked(file.Content, existingContent, knownHashes);
+        File.WriteAllText(fullPath, result.Content);
+
+        foreach (var (regionName, hash) in result.RegionHashes)
+        {
+            manifest.RegionHashes[keyPrefix + regionName] = hash;
+        }
 
         if (!manifest.GeneratedFiles.Contains(file.RelativePath, StringComparer.Ordinal))
         {

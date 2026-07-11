@@ -69,7 +69,9 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         };
     }
 
-    public IReadOnlyList<string> StartupApplyUsings { get; } = new[] { "Microsoft.Extensions.DependencyInjection" };
+    // "Microsoft.EntityFrameworkCore" is required for the DbContext.Database.Migrate()
+    // extension method to resolve — Program.cs otherwise has no reason to reference EF Core.
+    public IReadOnlyList<string> StartupApplyUsings { get; } = new[] { "Microsoft.Extensions.DependencyInjection", "Microsoft.EntityFrameworkCore" };
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
     {

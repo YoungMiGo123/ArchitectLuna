@@ -33,8 +33,7 @@ internal static class CompoundCommandSupport
 
         if (!IsInteractive())
         {
-            AnsiConsole.MarkupLineInterpolated(
-                $"[red]Feature '{featureName}' does not exist. Re-run with --yes (or --create-missing) to create it automatically in non-interactive mode.[/]");
+            AnsiConsole.MarkupLineInterpolated($"[red]Feature '{featureName}' does not exist. Run 'architect-luna add feature {featureName}' first, or re-run with --yes (or --create-missing) to create it automatically in non-interactive mode.[/]");
             return false;
         }
 

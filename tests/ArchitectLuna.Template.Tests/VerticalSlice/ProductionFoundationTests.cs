@@ -242,7 +242,7 @@ public sealed class ProductionFoundationTests
         var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("marten"), DatabaseApplyMode.OnStartup);
         var content = GenerationTestHarness.ContentOf(files, $"{Api}/Persistence/InfrastructureDependencyInjection.cs");
 
-        Assert.Contains("options.AutoCreateSchemaObjects = AutoCreate.All;", content);
+        Assert.Contains("options.AutoCreateSchemaObjects = JasperFx.AutoCreate.All;", content);
     }
 
     [Fact]
@@ -251,6 +251,6 @@ public sealed class ProductionFoundationTests
         var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("marten"), DatabaseApplyMode.Manual);
         var content = GenerationTestHarness.ContentOf(files, $"{Api}/Persistence/InfrastructureDependencyInjection.cs");
 
-        Assert.Contains("options.AutoCreateSchemaObjects = AutoCreate.CreateOrUpdate;", content);
+        Assert.Contains("options.AutoCreateSchemaObjects = JasperFx.AutoCreate.CreateOrUpdate;", content);
     }
 }

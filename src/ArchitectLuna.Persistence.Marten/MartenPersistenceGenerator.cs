@@ -43,7 +43,7 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         "}",
     };
 
-    public IReadOnlyList<string> StartupApplyUsings { get; } = new[] { "Microsoft.Extensions.DependencyInjection" };
+    public IReadOnlyList<string> StartupApplyUsings { get; } = new[] { "Microsoft.Extensions.DependencyInjection", "Marten" };
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
     {
@@ -98,7 +98,10 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
     /// </summary>
     public IReadOnlyList<string> BuildServiceRegistration(GenerationContext context, DatabaseApplyMode applyMode)
     {
-        var autoCreate = applyMode == DatabaseApplyMode.OnStartup ? "AutoCreate.All" : "AutoCreate.CreateOrUpdate";
+        // Fully qualified: StoreOptions.AutoCreateSchemaObjects is JasperFx.AutoCreate (moved out
+        // of the Marten package itself in Marten 9.x), not Marten.AutoCreate — qualifying avoids
+        // needing a "using JasperFx;" the caller may not otherwise have any reason to add.
+        var autoCreate = applyMode == DatabaseApplyMode.OnStartup ? "JasperFx.AutoCreate.All" : "JasperFx.AutoCreate.CreateOrUpdate";
         return new[]
         {
             "services.AddMarten(options =>",
