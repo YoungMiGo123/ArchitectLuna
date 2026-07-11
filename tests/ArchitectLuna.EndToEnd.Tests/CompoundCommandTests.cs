@@ -80,8 +80,10 @@ public sealed class CompoundCommandTests
             // `add crud` never fabricates a meaningless entity — even with --create-missing it
             // must still ask for the entity to be created first (docs/requirements/003-improvements.md §8.2).
             var addCrud = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "crud", "Payments", "PaymentRequest", "--create-missing");
-            Assert.NotEqual(0, addCrud.ExitCode);
-            Assert.Contains("Create the entity first", addCrud.StandardOutput + addCrud.StandardError);
+            Assert.True(addCrud.ExitCode != 0, $"'add crud --create-missing' unexpectedly succeeded:\n{addCrud}");
+            Assert.True(
+                (addCrud.StandardOutput + addCrud.StandardError).Contains("Create the entity first"),
+                $"Expected 'Create the entity first' guidance in output:\n{addCrud}");
         }
         finally
         {
