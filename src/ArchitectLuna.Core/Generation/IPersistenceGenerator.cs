@@ -38,10 +38,23 @@ public interface IPersistenceGenerator
     /// <summary>
     /// Solution-level file(s) needing visibility across every entity at once — a DbContext with
     /// one DbSet per entity, for example. Called once per `generate` run with every known entity.
-    /// Returns an empty list for providers with nothing solution-level to emit (e.g. Marten,
-    /// which just needs per-call session access, no aggregate registry file).
+    /// Returns an empty list for providers with nothing solution-level to emit.
+    ///
+    /// Provider registration is not spliced into AddInfrastructure line-by-line. Instead each
+    /// provider emits a full `AddPersistence(this IServiceCollection, IConfiguration)` extension
+    /// in its own file from here (so it is regenerated per `generate` with full entity knowledge —
+    /// which Marten needs to RegisterDocumentType per document, and which lets a provider emit a
+    /// startup schema initializer + DB health check). FoundationFiles' AddInfrastructure just
+    /// calls services.AddPersistence(configuration). See each provider's RenderAddPersistence.
+    ///
+    /// <paramref name="applyMode"/> (docs/requirements/003-improvements.md §9, §11) governs
+    /// whether that schema initializer actually runs automatically at process startup
+    /// (<see cref="Model.DatabaseApplyMode.OnStartup"/>) or is generated but left unregistered so
+    /// schema changes are applied only manually or via `generate`'s own `on-generate` step
+    /// (<see cref="Model.DatabaseApplyMode.Manual"/>/<see cref="Model.DatabaseApplyMode.OnGenerate"/>).
+    /// Providers with no schema to apply (in-memory, none) ignore it.
     /// </summary>
-    IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities);
+    IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities, Model.DatabaseApplyMode applyMode);
 
     /// <summary>
     /// The handler binding for a command targeting the given entity. Only ever called for a
@@ -51,43 +64,4 @@ public interface IPersistenceGenerator
 
     /// <summary>Same as <see cref="BindCommandHandler"/> but for a query handler.</summary>
     HandlerBinding BindQueryHandler(GenerationContext context, FeatureModel feature, EntityModel entity, QueryModel query);
-
-    /// <summary>
-    /// Source lines to splice into the generated `AddInfrastructure(IServiceCollection services,
-    /// IConfiguration configuration)` extension method to register this provider, e.g.
-    /// `services.AddDbContext...(configuration.GetConnectionString(...))`. Lines must reference
-    /// the `services` and `configuration` identifiers (never `builder.`) — Program.cs itself is
-    /// kept small and never regenerated per feature, so all registration detail lives behind the
-    /// extension method. Takes the full <see cref="GenerationContext"/> (not just the solution
-    /// name) so registration can correctly qualify the concrete type's namespace under
-    /// <see cref="GenerationContext.Infrastructure"/> and, when
-    /// <see cref="GenerationContext.HasSeparateInfrastructure"/>, also wire the interface
-    /// abstraction living in <see cref="GenerationContext.Application"/>. Return an empty list for
-    /// "no registration needed."
-    /// </summary>
-    IReadOnlyList<string> BuildServiceRegistration(GenerationContext context);
-
-    /// <summary>
-    /// Apply-mode-aware overload — only Marten currently varies registration by mode (toggling
-    /// <c>AutoCreateSchemaObjects</c>; EF Core's apply-mode behavior lives entirely in
-    /// <see cref="BuildStartupApplyLines"/>/`dotnet ef database update` instead). Defaults to the
-    /// plain overload so providers that don't care don't need to implement this separately.
-    /// </summary>
-    IReadOnlyList<string> BuildServiceRegistration(GenerationContext context, Model.DatabaseApplyMode applyMode) =>
-        BuildServiceRegistration(context);
-
-    /// <summary>Using directives BuildServiceRegistration's lines need, e.g. "Microsoft.EntityFrameworkCore".</summary>
-    IReadOnlyList<string> ServiceRegistrationUsings { get; }
-
-    /// <summary>
-    /// Statements spliced into Program.cs right after <c>var app = builder.Build();</c> when the
-    /// model's database apply mode is <see cref="Model.DatabaseApplyMode.OnStartup"/> — applying
-    /// EF Core migrations or Marten schema changes at process start
-    /// (docs/requirements/003-improvements.md §9, §11). Empty for providers with no schema to
-    /// apply (in-memory, none) — the default, so only providers that need this override it.
-    /// </summary>
-    IReadOnlyList<string> BuildStartupApplyLines(GenerationContext context) => Array.Empty<string>();
-
-    /// <summary>Using directives <see cref="BuildStartupApplyLines"/>'s lines need.</summary>
-    IReadOnlyList<string> StartupApplyUsings => Array.Empty<string>();
 }

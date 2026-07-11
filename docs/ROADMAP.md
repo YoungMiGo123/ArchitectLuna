@@ -101,21 +101,38 @@
   test` run of a generated solution's own test suite — which immediately caught that core
   WolverineFx stopped shipping its runtime compiler: generated Wolverine apps compiled but threw
   at startup; fixed via `WolverineFx.RuntimeCompilation` + `opts.UseRuntimeCompilation()`).
-
 - **Pagination for generated GetAll queries** (plan: `docs/plans/002-crud-getall-pagination.md`).
   Every CRUD-synthesized `GetAll{Entity}` query now accepts `page`/`pageSize` query-string
   parameters and returns `Result<PagedResult<T>>` — `PagedResult<T>` existed since the production
   foundation but was unused dead code until now. All three persistence providers page with
   `Skip`/`Take` (or the Marten/EF Core equivalent) instead of loading the entire table, ordered by
-  `Id` for deterministic paging; missing page/pageSize default to page 1 / 20 items. Works
-  identically across `mediatr`/`wolverine` and both `vertical-slice`/`clean-architecture` layouts —
-  Page/PageSize never join `QueryModel.Params`, so the route stays the plain collection route
-  (`GET /api/{feature}`) with no `RouteInference` changes. Out of scope: hand-authored
-  `add query --collection` queries (not CRUD-synthesized) are still unbounded; a typed Contracts
-  `PagedResponse<T>` DTO (currently an anonymous object) is a follow-up.
+  `Id` for deterministic paging; missing `page` defaults to 1, missing/oversized `pageSize`
+  defaults to and caps at 20/100 respectively (a resource-exhaustion guard added while merging
+  with plan 003 below). Works identically across `mediatr`/`wolverine` and both
+  `vertical-slice`/`clean-architecture` layouts — Page/PageSize never join `QueryModel.Params`, so
+  the route stays the plain collection route (`GET /api/{feature}`) with no `RouteInference`
+  changes. Out of scope: hand-authored `add query --collection` queries (not CRUD-synthesized) are
+  still unbounded; a typed Contracts `PagedResponse<T>` DTO (currently an anonymous object) is a
+  follow-up.
+- **Runnable persistence + schema init + production hardening** (plan:
+  `docs/plans/003-runnable-persistence-and-schema-init.md`, developed in parallel with plan 002
+  above and merged alongside it). Generated `efcore-postgres`/`efcore-sqlserver`/`marten`
+  solutions now create their own schema at startup and serve real CRUD against a live database
+  with no manual migration step — verified end to end against a live Postgres for MediatR+EF Core,
+  Wolverine+Marten, and Wolverine+EF Core, not just `dotnet build`. Each provider emits an
+  `AddPersistence` extension (regenerated per `generate` with full entity knowledge, replacing the
+  old scaffold-time `BuildServiceRegistration`): EF Core adds a `DatabaseInitializer`
+  (migrate-else-`EnsureCreated`) + `DatabaseHealthCheck` + connection resilience; Marten registers
+  every document type + `ApplyAllDatabaseChangesOnStartup()` + a health check. `/health` (liveness)
+  and `/health/ready` (DB readiness) are split. Wolverine handlers set
+  `ServiceLocationPolicy.AlwaysAllowed` so they resolve the injected
+  `DbContext`/`IDocumentSession` (Wolverine 6 otherwise throws at the first message). EF Core's
+  `Design` package is deliberately not scaffolded (its `PrivateAssets=all` split the `Relational`
+  assembly version between compile and runtime and threw at startup); migrations are a documented
+  opt-in.
 
 - **Generation quality, entity sync, and database readiness** (plan:
-  `docs/plans/003-generation-quality-and-db-readiness.md`; requirements:
+  `docs/plans/004-generation-quality-and-db-readiness.md`; requirements:
   `docs/requirements/003-improvements.md`). `add field`/`update entity --add-field` add a field to
   an existing entity and resync every dependent artifact (persistence config, commands, queries,
   validators, mappings, handlers) through the same pipeline `generate` uses; `sync entity` and
@@ -146,13 +163,19 @@
   proof that `IFrameworkAdapter` is a real seam, not just a naming convention.
 - **Grouped/split operation-layout mode** (docs/requirements/003-improvements.md §3.3). Command +
   handler + result in one file is now the (already-shipped) default; the `split` alternative that
-  breaks them into separate files was descoped from plan 003.
+  breaks them into separate files was descoped from plan 004.
 - **Marten `on-generate` apply mode.** Currently behaves like `manual` — there's no CLI-side
   equivalent to `dotnet ef database update` for Marten without the generator itself connecting to
-  a live database, which plan 003 deliberately didn't take on.
+  a live database, which plan 004 deliberately didn't take on.
+- **EF Core migrations, first-class.** *(Largely done as of plan 004: the `Microsoft.
+  EntityFrameworkCore.Design` package and a design-time `DbContext` factory ship with every
+  `efcore-*` scaffold, so `dotnet ef migrations add`/`database update` work out of the box, and
+  `database.applyMode: on-generate` runs `dotnet ef database update` automatically after
+  `generate`.)* Remaining: scaffold an initial migration automatically on first `add entity`/
+  `generate` rather than leaving that as a manual step.
 - **UI: `--rule` support in the add-entity form.** The CLI's `add entity --rule Field:RuleExpr`
   has no UI equivalent yet (self-disclosed gap from the UI build) — only Name/Type field rows.
-- **UI: `add field`, `config set`, and compound-command support.** New in plan 003; the UI's
+- **UI: `add field`, `config set`, and compound-command support.** New in plan 004; the UI's
   add-entity form doesn't yet cover any of it.
 
 ## Medium-term

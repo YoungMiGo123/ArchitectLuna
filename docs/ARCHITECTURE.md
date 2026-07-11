@@ -132,13 +132,38 @@ concerns into Api (`IEndpointDefinition`, exception + correlation-ID middleware,
 `AddApi`/`AddApplication`/`AddInfrastructure`, `UseApiMiddleware`, `MapApiEndpoints` — and is
 scaffold-time-only, never regenerated per feature. The one adapter-specific deviation: Wolverine's
 handler discovery is an `IHostBuilder` concern, so Wolverine solutions carry one extra
-`builder.Host.UseWolverine(opts => { opts.UseRuntimeCompilation(); ... })` block
-(`UseRuntimeCompilation` matters: core WolverineFx stopped shipping the runtime compiler, so
-without it — and the `WolverineFx.RuntimeCompilation` package the adapter now requires — a
-generated app compiles fine but throws at startup). Persistence registration reaches the generated
-`AddInfrastructure` through `IPersistenceGenerator.BuildServiceRegistration`, whose lines reference
-`services`/`configuration` — never `builder.` — because no provider is allowed to touch
-`Program.cs` anymore.
+`builder.Host.UseWolverine(opts => { … })` block. Two settings matter there:
+`opts.UseRuntimeCompilation()` (core WolverineFx stopped shipping the runtime compiler, so without
+it — and the `WolverineFx.RuntimeCompilation` package the adapter requires — a generated app
+compiles fine but throws at startup) and `opts.ServiceLocationPolicy = ServiceLocationPolicy.
+AlwaysAllowed` (Wolverine 6 otherwise refuses to service-locate a handler's injected
+`DbContext`/`IDocumentSession` from the DI scope and throws at the first message — this keeps the
+messaging and persistence seams orthogonal without an integration package).
+
+## Persistence registration, schema, and health (the `AddPersistence` seam)
+
+`Program.cs`/`AddInfrastructure` never contain per-provider registration. Instead each
+`IPersistenceGenerator` emits a `PersistenceRegistration.cs` — a static
+`AddPersistence(this IServiceCollection, IConfiguration)` — from `GenerateSolutionPersistence`,
+regenerated on every `generate` with the full entity list (and emitted at scaffold time with zero
+entities, like the DbContext). The foundation-owned `AddInfrastructure` just calls
+`services.AddPersistence(configuration)`. Giving the provider whole-model visibility at
+registration time is what lets **Marten** register each generated document type
+(`RegisterDocumentType<T>`) and apply schema at startup (`ApplyAllDatabaseChangesOnStartup()`), and
+lets **EF Core** register a `DatabaseInitializer` hosted service (migrate-if-migrations-exist-else-
+`EnsureCreated`) plus a `DatabaseHealthCheck` — so a generated `efcore-*`/`marten` solution creates
+its own schema and serves real CRUD against a live database with no manual migration step. EF Core
+deliberately does **not** scaffold `Microsoft.EntityFrameworkCore.Design`: as a `PrivateAssets=all`
+dev dependency it pins EF Core's `Relational` assembly to Microsoft's latest patch while the Npgsql
+provider tracks its own, and the private version never reaches the startup project's runtime output
+— an app that compiles but throws a `Relational` `FileNotFoundException` at boot; migrations remain
+an opt-in step (add Design + `dotnet ef migrations add`). Health is split by `EndpointExtensions`
+into `/health` (liveness) and `/health/ready` (readiness — the DB-tagged checks).
+
+Synthesized `GetAll` is **paged**: `CrudSynthesizer` gives it `Page`/`PageSize` params
+(`QueryModel.IsPaged`), `RouteInference` keeps it on the plain collection route (page/pageSize bind
+from the query string), the adapters render `Result<PagedResult<T>>` and a `PagedResult<Response>`
+endpoint, and every provider's GetAll binding does `Skip`/`Take` + a total `Count`.
 
 ## Component map
 

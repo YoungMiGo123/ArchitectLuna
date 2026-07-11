@@ -42,36 +42,21 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
     // Microsoft.EntityFrameworkCore.Design goes on the same project as the concrete DbContext
     // (Infrastructure, or the Api project itself for vertical slice) — that's the project
     // `dotnet ef migrations add --project ...` targets, and EF's tooling refuses to run without
-    // this package referenced there (docs/requirements/003-improvements.md §10.1).
+    // this package referenced there (docs/requirements/003-improvements.md §10.1). Added via the
+    // same `dotnet add package` flow as every other scaffolded dependency (no explicit pin), so it
+    // resolves to a version compatible with the Relational/provider packages added alongside it.
+    // The Hosting/HealthChecks abstractions are needed because — under Clean Architecture — the
+    // generated DatabaseInitializer (IHostedService) and DatabaseHealthCheck (IHealthCheck) live in
+    // the Infrastructure *class library*, which doesn't get them from the web framework the way the
+    // single-project vertical-slice layout does.
     public IReadOnlyList<string> RequiredPackages => _kind == EfCoreProviderKind.Postgres
-        ? new[] { "Microsoft.EntityFrameworkCore", "Npgsql.EntityFrameworkCore.PostgreSQL", "Microsoft.EntityFrameworkCore.Design" }
-        : new[] { "Microsoft.EntityFrameworkCore", "Microsoft.EntityFrameworkCore.SqlServer", "Microsoft.EntityFrameworkCore.Design" };
+        ? new[] { "Microsoft.EntityFrameworkCore", "Npgsql.EntityFrameworkCore.PostgreSQL", "Microsoft.EntityFrameworkCore.Design", "Microsoft.Extensions.Hosting.Abstractions", "Microsoft.Extensions.Diagnostics.HealthChecks" }
+        : new[] { "Microsoft.EntityFrameworkCore", "Microsoft.EntityFrameworkCore.SqlServer", "Microsoft.EntityFrameworkCore.Design", "Microsoft.Extensions.Hosting.Abstractions", "Microsoft.Extensions.Diagnostics.HealthChecks" };
 
     // Handler bodies (dbContext.Add/Find/Remove/SaveChangesAsync) and, under Clean Architecture,
     // the I{Solution}DbContext interface's DbSet<T> properties both live in Application — neither
     // needs the database-specific provider package, only EF Core's own abstractions.
     public IReadOnlyList<string> ApplicationRequiredPackages { get; } = new[] { "Microsoft.EntityFrameworkCore" };
-
-    public IReadOnlyList<string> ServiceRegistrationUsings { get; } = new[] { "Microsoft.EntityFrameworkCore" };
-
-    public IReadOnlyList<string> BuildStartupApplyLines(GenerationContext context)
-    {
-        // Always the concrete DbContext, never the I{Solution}DbContext abstraction used
-        // elsewhere under Clean Architecture — `.Database.Migrate()` is an EF Core DbContext
-        // member, not part of the hand-rolled interface (see DependencyTypeName's doc comment).
-        var dbContextName = DbContextName(context);
-        return new[]
-        {
-            "using (var scope = app.Services.CreateScope())",
-            "{",
-            $"    scope.ServiceProvider.GetRequiredService<{dbContextName}>().Database.Migrate();",
-            "}",
-        };
-    }
-
-    // "Microsoft.EntityFrameworkCore" is required for the DbContext.Database.Migrate()
-    // extension method to resolve — Program.cs otherwise has no reason to reference EF Core.
-    public IReadOnlyList<string> StartupApplyUsings { get; } = new[] { "Microsoft.Extensions.DependencyInjection", "Microsoft.EntityFrameworkCore" };
 
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity)
     {
@@ -85,7 +70,7 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         };
     }
 
-    public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities)
+    public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities, DatabaseApplyMode applyMode)
     {
         // Always emits the DbContext (even with zero DbSets) rather than only once an entity
         // exists: the generated AddInfrastructure references this type unconditionally as soon as
@@ -95,6 +80,9 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         {
             new($"{context.Infrastructure.ProjectRoot}/{DbContextName(context)}.cs", RenderDbContext(context, entities)),
             new($"{context.Infrastructure.ProjectRoot}/Persistence/{DbContextName(context)}Factory.cs", RenderDbContextFactory(context)),
+            new($"{context.Infrastructure.ProjectRoot}/DatabaseInitializer.cs", RenderDatabaseInitializer(context)),
+            new($"{context.Infrastructure.ProjectRoot}/DatabaseHealthCheck.cs", RenderDatabaseHealthCheck(context)),
+            new($"{context.Infrastructure.ProjectRoot}/PersistenceRegistration.cs", RenderAddPersistence(context, applyMode)),
         };
 
         if (context.HasSeparateInfrastructure)
@@ -129,7 +117,7 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         var dbSetName = NamingConventions.Pluralize(entity.Name);
 
         var body = query.IsPaged
-            ? RenderPagedGetAllBody(entity, resultName, dbSetName)
+            ? RenderGetAllPagedBody(entity, resultName, dbSetName)
             : query.IsCollection
                 ? RenderGetAllBody(entity, resultName, dbSetName)
                 : RenderGetByIdBody(entity, resultName, dbSetName);
@@ -137,28 +125,139 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         return new HandlerBinding(body, DependencyTypeName(context), "dbContext", HandlerUsings(context));
     }
 
-    public IReadOnlyList<string> BuildServiceRegistration(GenerationContext context)
+    private string RenderAddPersistence(GenerationContext context, DatabaseApplyMode applyMode)
     {
-        // Fully qualified rather than relying on a "using ...;" being present in the generated
-        // AddInfrastructure file — keeps this independent of whichever usings the caller composes.
-        var qualifiedDbContextName = $"{context.Infrastructure.RootNamespace}.{DbContextName(context)}";
+        var dbContextName = DbContextName(context);
+        // EnableRetryOnFailure: standard production resilience against transient DB faults.
         var useCall = _kind == EfCoreProviderKind.Postgres
-            ? "options.UseNpgsql(configuration.GetConnectionString(\"Default\"))"
-            : "options.UseSqlServer(configuration.GetConnectionString(\"Default\"))";
+            ? "options.UseNpgsql(configuration.GetConnectionString(\"Default\"), npgsql => npgsql.EnableRetryOnFailure())"
+            : "options.UseSqlServer(configuration.GetConnectionString(\"Default\"), sql => sql.EnableRetryOnFailure())";
+
+        var usings = new List<string>
+        {
+            "Microsoft.EntityFrameworkCore",
+            "Microsoft.Extensions.Configuration",
+            "Microsoft.Extensions.DependencyInjection",
+        };
+        if (context.HasSeparateInfrastructure)
+        {
+            usings.Add($"{context.Application.RootNamespace}.Persistence");
+        }
 
         var lines = new List<string>
         {
-            $"services.AddDbContext<{qualifiedDbContextName}>(options => {useCall});",
+            $"        services.AddDbContext<{dbContextName}>(options => {useCall});",
         };
-
         if (context.HasSeparateInfrastructure)
         {
-            var qualifiedInterfaceName = $"{context.Application.RootNamespace}.Persistence.{DbContextInterfaceName(context)}";
-            lines.Add($"services.AddScoped<{qualifiedInterfaceName}>(sp => sp.GetRequiredService<{qualifiedDbContextName}>());");
+            lines.Add($"        services.AddScoped<{DbContextInterfaceName(context)}>(sp => sp.GetRequiredService<{dbContextName}>());");
         }
 
-        return lines;
+        // Only "on-startup" registers the hosted service that migrates/EnsureCreates automatically
+        // at process start (docs/requirements/003-improvements.md §9, §11) — "manual" and
+        // "on-generate" apply schema changes explicitly instead (a developer running migrations by
+        // hand, or `generate` itself shelling out to `dotnet ef database update`), so a stray
+        // deploy never mutates a shared database without the operator asking for it.
+        if (applyMode == DatabaseApplyMode.OnStartup)
+        {
+            lines.Add("        services.AddHostedService<DatabaseInitializer>();");
+        }
+
+        // Readiness reporting is independent of apply mode — always useful to know the database is reachable.
+        lines.Add("        services.AddHealthChecks().AddCheck<DatabaseHealthCheck>(\"database\", tags: new[] { \"ready\" });");
+
+        var usingBlock = string.Join("\n", usings.Distinct().Select(u => $"using {u};"));
+        var body = string.Join("\n", lines);
+
+        return $$"""
+        {{usingBlock}}
+
+        namespace {{context.Infrastructure.RootNamespace}};
+
+        /// <summary>
+        /// Everything EF Core persistence registers: the DbContext (with connection resilience),
+        /// the Application-owned DbContext interface mapping (Clean Architecture), a startup schema
+        /// initializer (only when database.applyMode is "on-startup"), and a database readiness
+        /// health check. Regenerated on every `generate`.
+        /// </summary>
+        public static class PersistenceRegistration
+        {
+            public static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration configuration)
+            {
+        {{body}}
+                return services;
+            }
+        }
+        """;
     }
+
+    private static string RenderDatabaseInitializer(GenerationContext context) =>
+        $$"""
+        using Microsoft.EntityFrameworkCore;
+        using Microsoft.Extensions.DependencyInjection;
+        using Microsoft.Extensions.Hosting;
+
+        namespace {{context.Infrastructure.RootNamespace}};
+
+        /// <summary>
+        /// Ensures the database schema exists at startup. Applies EF Core migrations when the
+        /// project has any (the production path — add them with `dotnet ef migrations add`), and
+        /// otherwise falls back to EnsureCreated so a freshly generated solution is runnable
+        /// against a real database immediately without a migration step.
+        /// </summary>
+        public sealed class DatabaseInitializer : IHostedService
+        {
+            private readonly IServiceProvider _services;
+
+            public DatabaseInitializer(IServiceProvider services)
+            {
+                _services = services;
+            }
+
+            public async Task StartAsync(CancellationToken cancellationToken)
+            {
+                using var scope = _services.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<{{DbContextName(context)}}>();
+
+                if (dbContext.Database.GetMigrations().Any())
+                {
+                    await dbContext.Database.MigrateAsync(cancellationToken);
+                }
+                else
+                {
+                    await dbContext.Database.EnsureCreatedAsync(cancellationToken);
+                }
+            }
+
+            public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        }
+        """;
+
+    private static string RenderDatabaseHealthCheck(GenerationContext context) =>
+        $$"""
+        using Microsoft.EntityFrameworkCore;
+        using Microsoft.Extensions.Diagnostics.HealthChecks;
+
+        namespace {{context.Infrastructure.RootNamespace}};
+
+        /// <summary>Readiness check: reports Unhealthy until the database is reachable.</summary>
+        public sealed class DatabaseHealthCheck : IHealthCheck
+        {
+            private readonly {{DbContextName(context)}} _dbContext;
+
+            public DatabaseHealthCheck({{DbContextName(context)}} dbContext)
+            {
+                _dbContext = dbContext;
+            }
+
+            public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+            {
+                return await _dbContext.Database.CanConnectAsync(cancellationToken)
+                    ? HealthCheckResult.Healthy()
+                    : HealthCheckResult.Unhealthy("The database is not reachable.");
+            }
+        }
+        """;
 
     private static string DbContextName(GenerationContext context) => $"{context.RootNamespace}DbContext";
 
@@ -407,15 +506,17 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         return sb.ToString();
     }
 
-    private static string RenderPagedGetAllBody(EntityModel entity, string resultName, string dbSetName)
+    private static string RenderGetAllPagedBody(EntityModel entity, string resultName, string dbSetName)
     {
         var args = string.Join(", ", new[] { "entity.Id" }.Concat(entity.Fields.Select(f => $"entity.{f.Name}")));
         var sb = new StringBuilder();
         sb.AppendLine("var page = message.Page <= 0 ? 1 : message.Page;");
-        sb.AppendLine("var pageSize = message.PageSize <= 0 ? 20 : message.PageSize;");
+        // Capped, not just defaulted: an unbounded ?pageSize= is a resource-exhaustion vector.
+        sb.AppendLine("var pageSize = message.PageSize <= 0 ? 20 : Math.Min(message.PageSize, 100);");
         sb.AppendLine($"var totalCount = await dbContext.{dbSetName}.LongCountAsync(cancellationToken);");
         sb.AppendLine($"var entities = await dbContext.{dbSetName}.AsNoTracking().OrderBy(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync(cancellationToken);");
-        sb.Append($"return Result<PagedResult<{resultName}>>.Success(new PagedResult<{resultName}>(entities.Select(entity => new {resultName}({args})).ToList(), page, pageSize, totalCount));");
+        sb.AppendLine($"var items = entities.Select(entity => new {resultName}({args})).ToList();");
+        sb.Append($"return Result<PagedResult<{resultName}>>.Success(new PagedResult<{resultName}>(items, page, pageSize, totalCount));");
         return sb.ToString();
     }
 }

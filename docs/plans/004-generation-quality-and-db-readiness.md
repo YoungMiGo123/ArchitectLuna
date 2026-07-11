@@ -1,4 +1,4 @@
-# Plan 003: Generation quality, entity sync, and database readiness
+# Plan 004: Generation quality, entity sync, and database readiness
 
 - **Status:** Implemented, E2E verification partly blocked by sandbox network (see Outcome)
 - **Complexity:** L (spans `Core/Generation`, `Core/Model`, both adapters, all three persistence

@@ -20,7 +20,7 @@ public sealed class ProductionFoundationTests
     [InlineData("wolverine")]
     public void Foundation_ContainsEveryRequiredFile(string adapter)
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), adapter, GenerationTestHarness.Persistence("in-memory"));
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), adapter);
         var paths = files.Select(f => f.RelativePath).ToHashSet();
 
         var expected = new[]
@@ -52,7 +52,7 @@ public sealed class ProductionFoundationTests
     [Fact]
     public void ResultPattern_DeclaresAllRequiredTypes()
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("in-memory"));
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr");
 
         var result = GenerationTestHarness.ContentOf(files, $"{Api}/Common/Results/Result.cs");
         Assert.Contains("public class Result", result);
@@ -69,7 +69,7 @@ public sealed class ProductionFoundationTests
     [Fact]
     public void ResultHttpExtensions_MapEveryErrorTypeToItsStatusCode()
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("in-memory"));
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr");
         var content = GenerationTestHarness.ContentOf(files, $"{Api}/Common/ResultHttpExtensions.cs");
 
         Assert.Contains("ErrorType.Validation => StatusCodes.Status400BadRequest", content);
@@ -83,7 +83,7 @@ public sealed class ProductionFoundationTests
     [Fact]
     public void BaseEntity_CarriesProductionAuditFields()
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("in-memory"));
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr");
         var content = GenerationTestHarness.ContentOf(files, $"{Api}/Persistence/Common/BaseEntity.cs");
 
         Assert.Contains("public abstract class BaseEntity", content);
@@ -128,7 +128,7 @@ public sealed class ProductionFoundationTests
     [Fact]
     public void Middleware_IsRegisteredThroughExtensionMethods()
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("in-memory"));
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr");
         var middleware = GenerationTestHarness.ContentOf(files, $"{Api}/Common/MiddlewareExtensions.cs");
 
         Assert.Contains("UseMiddleware<CorrelationIdMiddleware>", middleware);
@@ -136,14 +136,15 @@ public sealed class ProductionFoundationTests
         Assert.Contains("UseSerilogRequestLogging", middleware);
 
         var endpoints = GenerationTestHarness.ContentOf(files, $"{Api}/Common/EndpointExtensions.cs");
-        Assert.Contains("MapHealthChecks(\"/health\")", endpoints);
+        Assert.Contains("MapHealthChecks(\"/health\"", endpoints);
+        Assert.Contains("MapHealthChecks(\"/health/ready\"", endpoints);
         Assert.Contains("IEndpointDefinition", endpoints);
     }
 
     [Fact]
     public void ExceptionMiddleware_HandlesDbUpdateConcurrencyAsConflictAndDbUpdateAsLoggedFailure()
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("in-memory"));
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr");
         var middleware = GenerationTestHarness.ContentOf(files, $"{Api}/Common/ExceptionHandlingMiddleware.cs");
 
         Assert.Contains("DbUpdateConcurrencyException", middleware);
@@ -159,33 +160,76 @@ public sealed class ProductionFoundationTests
     [InlineData("wolverine", "AddMediatR", false)]
     public void AddApplication_RegistersTheChosenDispatchersServices(string adapter, string registration, bool expected)
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), adapter, GenerationTestHarness.Persistence("in-memory"));
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), adapter);
         var content = GenerationTestHarness.ContentOf(files, $"{Api}/ApplicationDependencyInjection.cs");
 
         Assert.Equal(expected, content.Contains(registration));
     }
 
-    [Theory]
-    [InlineData("in-memory", "services.AddSingleton<BillingService.Persistence.InMemoryStore>();")]
-    [InlineData("efcore-postgres", "options.UseNpgsql(configuration.GetConnectionString(\"Default\"))")]
-    [InlineData("efcore-sqlserver", "options.UseSqlServer(configuration.GetConnectionString(\"Default\"))")]
-    [InlineData("marten", "options.Connection(configuration.GetConnectionString(\"Default\")!);")]
-    public void AddInfrastructure_RegistersTheChosenPersistenceProvider(string persistence, string expectedRegistration)
+    [Fact]
+    public void AddInfrastructure_RegistersTheClockAndDelegatesToAddPersistence()
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence(persistence));
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr");
         var content = GenerationTestHarness.ContentOf(files, $"{Api}/Persistence/InfrastructureDependencyInjection.cs");
 
-        Assert.Contains(expectedRegistration, content);
         Assert.Contains("services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();", content);
+        Assert.Contains("services.AddPersistence(configuration);", content);
+    }
+
+    [Theory]
+    [InlineData("in-memory", "services.AddSingleton<InMemoryStore>();")]
+    [InlineData("efcore-postgres", "options.UseNpgsql(configuration.GetConnectionString(\"Default\")")]
+    [InlineData("efcore-sqlserver", "options.UseSqlServer(configuration.GetConnectionString(\"Default\")")]
+    [InlineData("marten", "options.Connection(configuration.GetConnectionString(\"Default\")!)")]
+    public void AddPersistence_RegistersTheChosenPersistenceProvider(string persistence, string expectedRegistration)
+    {
+        var files = GenerationTestHarness.PersistenceSolutionFiles(GenerationTestHarness.VerticalSliceContext(), persistence, GenerationTestHarness.InvoiceFeature());
+        var content = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/PersistenceRegistration.cs");
+
+        Assert.Contains("public static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration configuration)", content);
+        Assert.Contains(expectedRegistration, content);
+    }
+
+    [Theory]
+    [InlineData("efcore-postgres")]
+    [InlineData("efcore-sqlserver")]
+    public void EfCore_AddPersistence_CreatesSchemaAtStartupAndAddsAReadinessHealthCheck(string persistence)
+    {
+        var context = GenerationTestHarness.VerticalSliceContext();
+        var files = GenerationTestHarness.PersistenceSolutionFiles(context, persistence, GenerationTestHarness.InvoiceFeature());
+
+        var registration = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/PersistenceRegistration.cs");
+        Assert.Contains("services.AddHostedService<DatabaseInitializer>();", registration);
+        Assert.Contains("AddCheck<DatabaseHealthCheck>(\"database\", tags: new[] { \"ready\" })", registration);
+        Assert.Contains("EnableRetryOnFailure()", registration);
+
+        var initializer = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/DatabaseInitializer.cs");
+        Assert.Contains("MigrateAsync", initializer);
+        Assert.Contains("EnsureCreatedAsync", initializer);
+
+        var health = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/DatabaseHealthCheck.cs");
+        Assert.Contains("CanConnectAsync", health);
     }
 
     [Fact]
-    public void AddInfrastructure_NonePersistence_StillRegistersFoundationServices()
+    public void Marten_AddPersistence_RegistersDocumentsAndAppliesSchemaAtStartup()
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("none"));
-        var content = GenerationTestHarness.ContentOf(files, $"{Api}/Persistence/InfrastructureDependencyInjection.cs");
+        var context = GenerationTestHarness.VerticalSliceContext();
+        var files = GenerationTestHarness.PersistenceSolutionFiles(context, "marten", GenerationTestHarness.InvoiceFeature());
 
-        Assert.Contains("services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();", content);
+        var registration = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/PersistenceRegistration.cs");
+        Assert.Contains("options.RegisterDocumentType<Invoice>();", registration);
+        Assert.Contains("ApplyAllDatabaseChangesOnStartup()", registration);
+        Assert.Contains("AddCheck<MartenHealthCheck>(\"database\", tags: new[] { \"ready\" })", registration);
+    }
+
+    [Fact]
+    public void None_AddPersistence_IsANoOp()
+    {
+        var files = GenerationTestHarness.PersistenceSolutionFiles(GenerationTestHarness.VerticalSliceContext(), "none", GenerationTestHarness.InvoiceFeature());
+        var content = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/PersistenceRegistration.cs");
+
+        Assert.Contains("public static IServiceCollection AddPersistence(this IServiceCollection services, IConfiguration configuration) => services;", content);
         Assert.DoesNotContain("AddDbContext", content);
         Assert.DoesNotContain("AddMarten", content);
     }
@@ -193,7 +237,7 @@ public sealed class ProductionFoundationTests
     [Fact]
     public void UserContext_ApplicationSeesAbstraction_ApiOwnsImplementation()
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("in-memory"));
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr");
 
         var abstraction = GenerationTestHarness.ContentOf(files, $"{Api}/Common/Abstractions/IUserContext.cs");
         Assert.DoesNotContain("IHttpContextAccessor", abstraction);
@@ -208,49 +252,51 @@ public sealed class ProductionFoundationTests
     }
 
     [Theory]
-    [InlineData("efcore-postgres", "Database.Migrate()")]
-    [InlineData("marten", "ApplyAllConfiguredChangesToDatabaseAsync")]
-    public void OnStartupApplyMode_AddsApplyCallToProgramCs(string persistence, string expectedCall)
+    [Fact]
+    public void OnStartupApplyMode_EfCore_RegistersDatabaseInitializerHostedService()
     {
-        var provider = GenerationTestHarness.Persistence(persistence);
-        var program = ProgramCsBuilder.BuildProgramCs(GenerationTestHarness.VerticalSliceContext(), "mediatr", provider, DatabaseApplyMode.OnStartup);
+        var context = GenerationTestHarness.VerticalSliceContext();
+        var files = GenerationTestHarness.PersistenceSolutionFiles(context, "efcore-postgres", GenerationTestHarness.InvoiceFeature(), DatabaseApplyMode.OnStartup);
+        var registration = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/PersistenceRegistration.cs");
 
-        Assert.Contains(expectedCall, program);
-        Assert.Contains("var app = builder.Build();", program);
-        // The apply call must run after the app is built (needs a resolved DI scope) but before
-        // middleware/endpoints are wired up.
-        Assert.True(program.IndexOf("var app = builder.Build();", StringComparison.Ordinal) < program.IndexOf(expectedCall, StringComparison.Ordinal));
-        Assert.True(program.IndexOf(expectedCall, StringComparison.Ordinal) < program.IndexOf("app.UseApiMiddleware();", StringComparison.Ordinal));
+        Assert.Contains("services.AddHostedService<DatabaseInitializer>();", registration);
     }
 
     [Theory]
-    [InlineData("efcore-postgres")]
-    [InlineData("marten")]
-    [InlineData("in-memory")]
-    public void ManualApplyMode_DoesNotAddApplyCallToProgramCs(string persistence)
+    [InlineData(DatabaseApplyMode.Manual)]
+    [InlineData(DatabaseApplyMode.OnGenerate)]
+    public void NonStartupApplyMode_EfCore_DoesNotRegisterDatabaseInitializerHostedService(DatabaseApplyMode applyMode)
     {
-        var provider = GenerationTestHarness.Persistence(persistence);
-        var program = ProgramCsBuilder.BuildProgramCs(GenerationTestHarness.VerticalSliceContext(), "mediatr", provider, DatabaseApplyMode.Manual);
+        var context = GenerationTestHarness.VerticalSliceContext();
+        var files = GenerationTestHarness.PersistenceSolutionFiles(context, "efcore-postgres", GenerationTestHarness.InvoiceFeature(), applyMode);
+        var registration = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/PersistenceRegistration.cs");
 
-        Assert.DoesNotContain("Database.Migrate()", program);
-        Assert.DoesNotContain("ApplyAllConfiguredChangesToDatabaseAsync", program);
+        Assert.DoesNotContain("services.AddHostedService<DatabaseInitializer>();", registration);
+        // Readiness reporting is independent of apply mode.
+        Assert.Contains("AddCheck<DatabaseHealthCheck>(\"database\", tags: new[] { \"ready\" })", registration);
     }
 
     [Fact]
-    public void OnStartupApplyMode_MartenSetsAutoCreateSchemaObjectsToAll()
+    public void OnStartupApplyMode_MartenSetsAutoCreateSchemaObjectsToAllAndAppliesOnStartup()
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("marten"), DatabaseApplyMode.OnStartup);
-        var content = GenerationTestHarness.ContentOf(files, $"{Api}/Persistence/InfrastructureDependencyInjection.cs");
+        var context = GenerationTestHarness.VerticalSliceContext();
+        var files = GenerationTestHarness.PersistenceSolutionFiles(context, "marten", GenerationTestHarness.InvoiceFeature(), DatabaseApplyMode.OnStartup);
+        var content = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/PersistenceRegistration.cs");
 
         Assert.Contains("options.AutoCreateSchemaObjects = JasperFx.AutoCreate.All;", content);
+        Assert.Contains("ApplyAllDatabaseChangesOnStartup()", content);
     }
 
-    [Fact]
-    public void ManualApplyMode_MartenLeavesAutoCreateSchemaObjectsAtCreateOrUpdate()
+    [Theory]
+    [InlineData(DatabaseApplyMode.Manual)]
+    [InlineData(DatabaseApplyMode.OnGenerate)]
+    public void NonStartupApplyMode_MartenLeavesAutoCreateSchemaObjectsAtCreateOrUpdateAndDoesNotApplyOnStartup(DatabaseApplyMode applyMode)
     {
-        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr", GenerationTestHarness.Persistence("marten"), DatabaseApplyMode.Manual);
-        var content = GenerationTestHarness.ContentOf(files, $"{Api}/Persistence/InfrastructureDependencyInjection.cs");
+        var context = GenerationTestHarness.VerticalSliceContext();
+        var files = GenerationTestHarness.PersistenceSolutionFiles(context, "marten", GenerationTestHarness.InvoiceFeature(), applyMode);
+        var content = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/PersistenceRegistration.cs");
 
         Assert.Contains("options.AutoCreateSchemaObjects = JasperFx.AutoCreate.CreateOrUpdate;", content);
+        Assert.DoesNotContain("ApplyAllDatabaseChangesOnStartup()", content);
     }
 }

@@ -47,13 +47,13 @@ public static class SolutionScaffolder
         // The production foundation: Result pattern, BaseEntity, abstractions, middleware, and
         // the extension methods Program.cs is built from. Scaffold-time only — `generate` never
         // rewrites these.
-        WriteGeneratedFiles(root, FoundationFiles.BuildAll(context, adapterName, persistence, applyMode));
+        WriteGeneratedFiles(root, FoundationFiles.BuildAll(context, adapterName));
 
         // So a fresh scaffold compiles before the first `generate`: AddInfrastructure already
         // references the DbContext/store type as soon as persistence is configured, so it must
         // already exist (with zero DbSets — `generate` re-renders it with real ones once entities
         // are added).
-        WriteGeneratedFiles(root, persistence.GenerateSolutionPersistence(context, Array.Empty<EntityReference>()));
+        WriteGeneratedFiles(root, persistence.GenerateSolutionPersistence(context, Array.Empty<EntityReference>(), applyMode));
 
         File.WriteAllText(Path.Combine(root, "Dockerfile"), InfrastructureFiles.Dockerfile(solutionName));
         File.WriteAllText(Path.Combine(root, "docker-compose.yml"), InfrastructureFiles.DockerCompose(solutionName, persistenceProvider));
@@ -133,7 +133,7 @@ public static class SolutionScaffolder
 
         var csprojPath = Path.Combine(apiProjectDir, $"{solutionName}.Api.csproj");
         File.WriteAllText(csprojPath, ProjectFiles.WebProject());
-        WriteApiProjectFiles(apiProjectDir, context, adapterName, PersistenceRegistry.ParseProvider(persistence.Name), persistence, applyMode);
+        WriteApiProjectFiles(apiProjectDir, context, adapterName, PersistenceRegistry.ParseProvider(persistence.Name));
 
         var apiCsprojRelative = Path.Combine(apiProjectRelative, $"{solutionName}.Api.csproj");
         RunDotnet(root, "sln", "add", apiCsprojRelative);
@@ -185,7 +185,7 @@ public static class SolutionScaffolder
             $"../{solutionName}.Application/{solutionName}.Application.csproj",
             $"../{solutionName}.Infrastructure/{solutionName}.Infrastructure.csproj",
         }));
-        WriteApiProjectFiles(apiDir, context, adapterName, PersistenceRegistry.ParseProvider(persistence.Name), persistence, applyMode);
+        WriteApiProjectFiles(apiDir, context, adapterName, PersistenceRegistry.ParseProvider(persistence.Name));
 
         foreach (var (relative, csprojPath) in new[]
         {
@@ -230,9 +230,9 @@ public static class SolutionScaffolder
         "Microsoft.Extensions.Configuration.Abstractions",
     };
 
-    private static void WriteApiProjectFiles(string apiProjectDir, GenerationContext context, string adapterName, PersistenceProvider persistenceProvider, IPersistenceGenerator persistence, DatabaseApplyMode applyMode)
+    private static void WriteApiProjectFiles(string apiProjectDir, GenerationContext context, string adapterName, PersistenceProvider persistenceProvider)
     {
-        File.WriteAllText(Path.Combine(apiProjectDir, "Program.cs"), ProgramCsBuilder.BuildProgramCs(context, adapterName, persistence, applyMode));
+        File.WriteAllText(Path.Combine(apiProjectDir, "Program.cs"), ProgramCsBuilder.BuildProgramCs(context, adapterName));
 
         var propertiesDir = Path.Combine(apiProjectDir, "Properties");
         Directory.CreateDirectory(propertiesDir);

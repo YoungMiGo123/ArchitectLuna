@@ -81,7 +81,7 @@ public static class GenerationRunner
             }
         }
 
-        foreach (var file in persistence.GenerateSolutionPersistence(generationContext, allEntities))
+        foreach (var file in persistence.GenerateSolutionPersistence(generationContext, allEntities, model.Database.ApplyMode))
         {
             FileWriter.Write(root, file, manifest);
             fileCount++;

@@ -66,7 +66,8 @@ public sealed class PaginationSnapshotTests
         var handler = GenerationTestHarness.ContentOf(files, $"{Slice}/GetAllInvoicesHandler.cs");
 
         Assert.Contains("message.Page <= 0 ? 1 : message.Page", handler);
-        Assert.Contains("message.PageSize <= 0 ? 20 : message.PageSize", handler);
+        // Capped, not just defaulted: an unbounded ?pageSize= is a resource-exhaustion vector.
+        Assert.Contains("message.PageSize <= 0 ? 20 : Math.Min(message.PageSize, 100)", handler);
         Assert.Contains(".Skip((page - 1) * pageSize)", handler);
         Assert.Contains(".Take(pageSize)", handler);
         Assert.Contains("PagedResult<GetAllInvoicesResult>", handler);

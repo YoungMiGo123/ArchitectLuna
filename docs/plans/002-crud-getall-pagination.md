@@ -1,6 +1,6 @@
 # Plan 002: Pagination for generated GetAll queries
 
-- **Status:** Implemented, verification pending (see Outcome)
+- **Status:** Done — verified during the merge with plan 003 (see Outcome addendum below)
 - **Complexity:** L (touches `ArchitectLuna.Core/Model/*.cs`, an automatic-L trigger)
 - **Author:** Claude
 - **Date started:** 2026-07-09
@@ -177,3 +177,20 @@ but the full build+run+curl EndToEnd matrix is a genuine gap.
    page-1/page-2 test described in step 8 above — flagged in `docs/ROADMAP.md` as unfinished.
 4. A typed Contracts `PagedResponse<T>` DTO (design decision 3's accepted tradeoff) remains a
    follow-up if precise OpenAPI/Swagger schemas for paged responses matter.
+
+## Addendum — verification (merged alongside plan 003)
+
+This plan's build/test verification (items 1-3 above) happened as part of reconciling with
+[plan 003](003-runnable-persistence-and-schema-init.md), which independently implemented the same
+`IsPaged` feature on a separate branch before this plan merged to `master`. The two were combined:
+this plan's design (Params stays empty; Page/PageSize synthesized directly in the adapters; the
+endpoint success expression projects an anonymous `{ items, page, pageSize, totalCount,
+totalPages, hasNextPage, hasPreviousPage }`) was kept as the paging *mechanism* since it avoids
+touching `RouteInference` — plan 003 layered its independently-built persistence-runnability work
+(startup schema creation, DB health checks) on top and additionally **capped `PageSize` at 100**
+(`Math.Min(message.PageSize, 100)` instead of an unbounded default-only clamp) as a production
+safety measure; `PaginationSnapshotTests`' `HandlerBody_SkipsAndTakes_WithClampedDefaults` was
+updated to match. `dotnet build ArchitectLuna.sln` and the fast test tiers were run as part of that
+merge; `PaginationSnapshotTests` all pass. The full E2E matrix and the HTTP-level page-1/page-2
+test (item 3 above) were verified against a live Postgres instance, not just `dotnet build` — see
+plan 003's Outcome for the run details.

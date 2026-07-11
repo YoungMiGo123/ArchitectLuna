@@ -69,7 +69,7 @@ public static class GenerationTestHarness
 
     /// <summary>Everything one `generate` run would write for the feature: entity persistence + all slices + solution persistence.</summary>
     public static IReadOnlyList<GeneratedFile> GenerateFeature(
-        GenerationContext context, string adapterName, string persistenceName, FeatureModel feature)
+        GenerationContext context, string adapterName, string persistenceName, FeatureModel feature, DatabaseApplyMode applyMode = DatabaseApplyMode.OnStartup)
     {
         var persistence = Persistence(persistenceName);
         var adapter = Adapter(adapterName, persistence);
@@ -91,8 +91,18 @@ public static class GenerationTestHarness
         }
 
         var references = feature.Entities.Select(e => new EntityReference(feature, e)).ToList();
-        files.AddRange(persistence.GenerateSolutionPersistence(context, references));
+        files.AddRange(persistence.GenerateSolutionPersistence(context, references, applyMode));
         return files;
+    }
+
+    /// <summary>
+    /// The persistence provider's solution-level files (AddPersistence registration, schema
+    /// initializer, DB health check) as they'd be emitted by `generate` for the given entities.
+    /// </summary>
+    public static IReadOnlyList<GeneratedFile> PersistenceSolutionFiles(GenerationContext context, string persistenceName, FeatureModel feature, DatabaseApplyMode applyMode = DatabaseApplyMode.OnStartup)
+    {
+        var references = feature.Entities.Select(e => new EntityReference(feature, e)).ToList();
+        return Persistence(persistenceName).GenerateSolutionPersistence(context, references, applyMode);
     }
 
     public static string ContentOf(IReadOnlyList<GeneratedFile> files, string relativePath)

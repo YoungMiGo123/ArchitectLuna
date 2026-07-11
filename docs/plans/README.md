@@ -12,5 +12,6 @@ delete completed plans — they are the design history of the project.
 | # | Plan | Status |
 |---|---|---|
 | 001 | [Production foundation + testing layer](001-production-foundation-and-testing-layer.md) | Done |
-| 002 | [Pagination for generated GetAll queries](002-crud-getall-pagination.md) | Implemented, verification pending |
-| 003 | [Generation quality, entity sync, and database readiness](003-generation-quality-and-db-readiness.md) | Implemented, full E2E matrix verification pending (see Outcome) |
+| 002 | [Pagination for generated GetAll queries](002-crud-getall-pagination.md) | Done |
+| 003 | [Runnable persistence + schema init](003-runnable-persistence-and-schema-init.md) | Done |
+| 004 | [Generation quality, entity sync, and database readiness](004-generation-quality-and-db-readiness.md) | Implemented, full E2E matrix verification pending (see Outcome) |

@@ -248,13 +248,37 @@ slice per command/query. Where those files land depends on `--architecture`:
 | Update | `PUT /api/invoices/{id}` | `200 OK` | Request, Command, Result, Response, Validator, Handler, Mappings, Endpoint |
 | Delete | `DELETE /api/invoices/{id}` | `204 No Content` | Command, Result, Handler, Endpoint |
 | GetById | `GET /api/invoices/{id}` | `200 OK` | Query, Result, Response, Handler, Mappings, Endpoint |
-| GetAll | `GET /api/invoices` | `200 OK` (list) | Query, Result (wrapped as `IReadOnlyList<T>`), Response, Handler, Mappings, Endpoint |
+| GetAll | `GET /api/invoices?page=&pageSize=` | `200 OK` (paged) | Query, Result (wrapped as `PagedResult<T>`), Response, Handler, Mappings, Endpoint |
 
 Handlers return `Result<T>` — not-found, conflict, and validation outcomes are values, not
 exceptions — and every endpoint maps failures through one shared `ToProblem()` extension:
 Validation→400, NotFound→404, Conflict→409, Unauthorized→401, Forbidden→403, anything else→500.
 Mappings are explicit generated extension methods (`request.ToCommand()`, `result.ToResponse()`)
-— no mapping library.
+— no mapping library. `GetAll` is paged out of the box: it binds `?page=&pageSize=` from the query
+string (defaults 1/20, capped) and returns a `PagedResult<T>` carrying `page`, `pageSize`,
+`totalCount`, and computed `totalPages`/`hasNextPage`/`hasPreviousPage`.
+
+### Runnable against a real database, immediately
+
+Persistence isn't just "compiles" — a generated `efcore-postgres`, `efcore-sqlserver`, or `marten`
+solution **creates its own schema at startup and serves real CRUD against a live database with no
+manual migration step**. Each provider generates an `AddPersistence` extension (regenerated on
+every `generate` so it knows every entity) that wires:
+
+- **EF Core**: the `DbContext` (with `EnableRetryOnFailure` resilience), a `DatabaseInitializer`
+  hosted service that applies migrations when any exist and otherwise `EnsureCreated`, and a
+  `DatabaseHealthCheck`. Migrations are an opt-in production step — add
+  `Microsoft.EntityFrameworkCore.Design` and `dotnet ef migrations add`, and the initializer
+  applies them instead of `EnsureCreated`.
+- **Marten**: every generated document registered with the store plus
+  `ApplyAllDatabaseChangesOnStartup()`, so document tables are created at boot, and a Marten health
+  check.
+
+Two health probes are exposed: `/health` (liveness — the process is up) and `/health/ready`
+(readiness — the database is reachable), so an orchestrator can tell "started" from "can serve
+traffic". Verified end to end against a live Postgres for MediatR+EF Core, Wolverine+Marten, and
+Wolverine+EF Core (tables auto-created, CRUD, pagination, readiness all green), not just by
+`dotnet build`.
 
 If `--persistence` is anything but `none`, `generate` additionally emits a domain/entity class per
 entity (`Entities/Invoice.cs` for in-memory and EF Core, `Documents/Invoice.cs` for Marten) and one
