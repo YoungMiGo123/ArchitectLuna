@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ArchitectLuna.EndToEnd.Tests.Infrastructure;
 
@@ -8,6 +9,17 @@ public sealed record ProcessResult(int ExitCode, string StandardOutput, string S
 {
     public override string ToString() =>
         $"exit code {ExitCode}\n--- stdout ---\n{StandardOutput}\n--- stderr ---\n{StandardError}";
+
+    /// <summary>
+    /// Stdout+stderr with all whitespace runs (including line breaks) collapsed to a single
+    /// space. Spectre.Console word-wraps markup output to the detected console width, which
+    /// differs by environment (e.g. this sandbox vs. a GitHub Actions runner) — a multi-word
+    /// phrase assertion against the raw output can flake if a line break happens to fall inside
+    /// the exact phrase being checked. Assert against this instead of the raw strings whenever a
+    /// check spans more than one word.
+    /// </summary>
+    public string CombinedOutputNormalized() =>
+        Regex.Replace(StandardOutput + " " + StandardError, @"\s+", " ").Trim();
 }
 
 /// <summary>Shells out to a process (the built CLI, or `dotnet build`) and captures its result.</summary>

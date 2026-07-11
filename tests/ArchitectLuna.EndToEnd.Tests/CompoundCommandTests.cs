@@ -53,7 +53,7 @@ public sealed class CompoundCommandTests
 
             var addEntity = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "entity", "Payments", "PaymentRequest", "--field", "AmountCents:long", "--yes");
             Assert.True(addEntity.ExitCode == 0, $"'add entity --yes' failed:\n{addEntity}");
-            Assert.Contains("Created feature 'Payments'", addEntity.StandardOutput);
+            Assert.Contains("Created feature 'Payments'", addEntity.CombinedOutputNormalized());
 
             var modelYaml = File.ReadAllText(Path.Combine(solutionRoot, ".architect", "model.yaml"));
             Assert.Contains("Payments", modelYaml);
@@ -82,7 +82,7 @@ public sealed class CompoundCommandTests
             var addCrud = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "crud", "Payments", "PaymentRequest", "--create-missing");
             Assert.True(addCrud.ExitCode != 0, $"'add crud --create-missing' unexpectedly succeeded:\n{addCrud}");
             Assert.True(
-                (addCrud.StandardOutput + addCrud.StandardError).Contains("Create the entity first"),
+                addCrud.CombinedOutputNormalized().Contains("Create the entity first"),
                 $"Expected 'Create the entity first' guidance in output:\n{addCrud}");
         }
         finally

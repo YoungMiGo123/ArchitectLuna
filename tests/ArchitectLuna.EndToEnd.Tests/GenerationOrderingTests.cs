@@ -49,7 +49,7 @@ public sealed class GenerationOrderingTests
             // Rule 2: a feature must exist before entities can be added to it.
             var entityWithoutFeature = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "entity", "Invoices", "Invoice", "--field", "AmountCents:long");
             Assert.NotEqual(0, entityWithoutFeature.ExitCode);
-            Assert.Contains("add feature Invoices", entityWithoutFeature.StandardOutput + entityWithoutFeature.StandardError);
+            Assert.Contains("add feature Invoices", entityWithoutFeature.CombinedOutputNormalized());
 
             var addFeature = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "feature", "Invoices");
             Assert.True(addFeature.ExitCode == 0, $"'add feature' failed:\n{addFeature}");
@@ -57,7 +57,7 @@ public sealed class GenerationOrderingTests
             // Rule 3: CRUD requires the entity to exist first.
             var crudWithoutEntity = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "crud", "Invoices", "Invoice");
             Assert.NotEqual(0, crudWithoutEntity.ExitCode);
-            Assert.Contains("Create the entity first", crudWithoutEntity.StandardOutput + crudWithoutEntity.StandardError);
+            Assert.Contains("Create the entity first", crudWithoutEntity.CombinedOutputNormalized());
 
             var addEntity = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "entity", "Invoices", "Invoice", "--field", "AmountCents:long");
             Assert.True(addEntity.ExitCode == 0, $"'add entity' failed:\n{addEntity}");
@@ -66,12 +66,12 @@ public sealed class GenerationOrderingTests
             var modelBeforeDuplicate = File.ReadAllText(modelPath);
             var duplicateEntity = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "entity", "Invoices", "Invoice", "--field", "AmountCents:long");
             Assert.NotEqual(0, duplicateEntity.ExitCode);
-            Assert.Contains("already exists", duplicateEntity.StandardOutput + duplicateEntity.StandardError);
+            Assert.Contains("already exists", duplicateEntity.CombinedOutputNormalized());
             Assert.Equal(modelBeforeDuplicate, File.ReadAllText(modelPath));
 
             var duplicateFeature = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "feature", "Invoices");
             Assert.NotEqual(0, duplicateFeature.ExitCode);
-            Assert.Contains("already exists", duplicateFeature.StandardOutput + duplicateFeature.StandardError);
+            Assert.Contains("already exists", duplicateFeature.CombinedOutputNormalized());
 
             // Rule 4: bespoke commands/queries are allowed without an entity.
             var addFeatureReports = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "feature", "Reports");
@@ -86,7 +86,7 @@ public sealed class GenerationOrderingTests
             // `add crud` for an entity whose operations all exist is a safe no-op.
             var idempotentCrud = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "crud", "Invoices", "Invoice");
             Assert.Equal(0, idempotentCrud.ExitCode);
-            Assert.Contains("nothing to add", idempotentCrud.StandardOutput + idempotentCrud.StandardError);
+            Assert.Contains("nothing to add", idempotentCrud.CombinedOutputNormalized());
         }
         finally
         {

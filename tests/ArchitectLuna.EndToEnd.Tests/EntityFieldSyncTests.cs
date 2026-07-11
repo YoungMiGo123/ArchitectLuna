@@ -67,7 +67,7 @@ public sealed class EntityFieldSyncTests
 
             var addField = ProcessRunner.RunCli(cliDllPath, solutionRoot, "add", "field", "Invoices", "Invoice", "Reference:string");
             Assert.NotEqual(0, addField.ExitCode);
-            Assert.Contains("Create the entity first", addField.StandardOutput + addField.StandardError);
+            Assert.Contains("Create the entity first", addField.CombinedOutputNormalized());
         }
         finally
         {
@@ -145,7 +145,7 @@ public sealed class EntityFieldSyncTests
 
             var sync = ProcessRunner.RunCli(cliDllPath, solutionRoot, "sync", "entity", "Invoices", "Invoice");
             Assert.NotEqual(0, sync.ExitCode);
-            Assert.Contains("does not exist", sync.StandardOutput + sync.StandardError);
+            Assert.Contains("does not exist", sync.CombinedOutputNormalized());
         }
         finally
         {
