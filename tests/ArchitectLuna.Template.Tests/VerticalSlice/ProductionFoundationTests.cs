@@ -251,7 +251,6 @@ public sealed class ProductionFoundationTests
         Assert.Contains("services.AddScoped<IUserContext, HttpUserContext>();", registration);
     }
 
-    [Theory]
     [Fact]
     public void OnStartupApplyMode_EfCore_RegistersDatabaseInitializerHostedService()
     {

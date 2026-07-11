@@ -39,6 +39,10 @@ public sealed class DockerReadinessTests
 
         Assert.Contains("pg_isready", compose);
         Assert.Contains("condition: service_healthy", compose);
+        // A database is configured, so the api service's own healthcheck should hit the readiness
+        // probe (DB-tagged checks), not just liveness — reporting healthy before the app can
+        // actually serve a request against its database defeats the point of `depends_on: service_healthy`.
+        Assert.Contains("http://localhost:8080/health/ready", compose);
     }
 
     [Fact]

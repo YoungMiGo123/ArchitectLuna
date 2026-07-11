@@ -109,8 +109,8 @@ public static class GenerationRunner
     /// not fail generation. EF Core runs `dotnet ef database update` (requires the `dotnet-ef`
     /// tool and at least one migration to already exist); Marten has no CLI-side migration step —
     /// its schema is applied lazily by the store itself, so `on-generate` behaves like `manual`
-    /// until the app actually runs (see <see cref="ArchitectLuna.Core.Generation.IPersistenceGenerator.BuildStartupApplyLines"/>
-    /// for the `on-startup` case, which does apply it).
+    /// until the app actually runs (see <see cref="ArchitectLuna.Core.Generation.IPersistenceGenerator.GenerateSolutionPersistence"/>
+    /// for the `on-startup` case, which registers a startup schema initializer that does apply it).
     /// </summary>
     private static void TryApplyOnGenerate(string root, ArchitectModel model, GenerationContext generationContext)
     {

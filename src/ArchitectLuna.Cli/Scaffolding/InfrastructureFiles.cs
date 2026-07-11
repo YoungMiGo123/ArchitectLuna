@@ -110,7 +110,7 @@ public static class InfrastructureFiles
               ASPNETCORE_ENVIRONMENT: Development
               ConnectionStrings__Default: "{{DockerConnectionString(solutionName, provider)}}"
             healthcheck:
-              test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+              test: ["CMD", "curl", "-f", "http://localhost:8080/health/ready"]
               interval: 30s
               timeout: 5s
               retries: 3
