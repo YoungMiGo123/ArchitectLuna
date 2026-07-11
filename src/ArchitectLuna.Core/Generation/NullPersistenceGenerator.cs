@@ -17,7 +17,7 @@ public sealed class NullPersistenceGenerator : IPersistenceGenerator
     public IReadOnlyList<GeneratedFile> GenerateEntityPersistence(GenerationContext context, FeatureModel feature, EntityModel entity) =>
         Array.Empty<GeneratedFile>();
 
-    public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities) =>
+    public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities, DatabaseApplyMode applyMode) =>
         new[] { new GeneratedFile($"{context.Infrastructure.ProjectRoot}/PersistenceRegistration.cs", RenderNoOpAddPersistence(context)) };
 
     private static string RenderNoOpAddPersistence(GenerationContext context) =>
@@ -43,6 +43,4 @@ public sealed class NullPersistenceGenerator : IPersistenceGenerator
 
     public HandlerBinding BindQueryHandler(GenerationContext context, FeatureModel feature, EntityModel entity, QueryModel query) =>
         HandlerBinding.NotImplemented();
-
-    public IReadOnlyList<string> BuildServiceRegistration(GenerationContext context) => Array.Empty<string>();
 }

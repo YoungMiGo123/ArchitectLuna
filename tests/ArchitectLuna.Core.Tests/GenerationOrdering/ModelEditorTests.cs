@@ -272,4 +272,70 @@ public sealed class ModelEditorTests
         Assert.Contains("already exists", result.Error);
         Assert.Single(model.Features.Single().Queries);
     }
+
+    [Fact]
+    public void AddFieldToEntity_MissingFeature_FailsWithGuidance()
+    {
+        var model = EmptyModel();
+
+        var result = ModelEditor.AddFieldToEntity(model, "Invoices", "Invoice", new FieldModel { Name = "Reference", Type = "string" });
+
+        Assert.False(result.Success);
+        Assert.Contains("add feature Invoices", result.Error);
+    }
+
+    [Fact]
+    public void AddFieldToEntity_MissingEntity_FailsWithGuidance()
+    {
+        var model = EmptyModel();
+        ModelEditor.AddFeature(model, "Invoices");
+
+        var result = ModelEditor.AddFieldToEntity(model, "Invoices", "Invoice", new FieldModel { Name = "Reference", Type = "string" });
+
+        Assert.False(result.Success);
+        Assert.Contains("Create the entity first", result.Error);
+    }
+
+    [Fact]
+    public void AddFieldToEntity_Duplicate_Fails()
+    {
+        var model = EmptyModel();
+        ModelEditor.AddFeature(model, "Invoices");
+        ModelEditor.AddEntity(model, "Invoices", Invoice());
+
+        var result = ModelEditor.AddFieldToEntity(model, "Invoices", "Invoice", new FieldModel { Name = "AmountCents", Type = "long" });
+
+        Assert.False(result.Success);
+        Assert.Contains("already exists", result.Error);
+    }
+
+    [Fact]
+    public void AddFieldToEntity_AddsFieldToEntityAndEveryDependentCommandAndQuery()
+    {
+        var model = EmptyModel();
+        ModelEditor.AddFeature(model, "Invoices");
+        ModelEditor.AddEntity(model, "Invoices", Invoice());
+
+        var result = ModelEditor.AddFieldToEntity(model, "Invoices", "Invoice", new FieldModel { Name = "Reference", Type = "string" });
+
+        Assert.True(result.Success);
+        var feature = model.Features.Single();
+        Assert.Contains(feature.Entities.Single().Fields, f => f.Name == "Reference");
+
+        var createCommand = feature.Commands.Single(c => c.Name == "CreateInvoice");
+        Assert.Contains(createCommand.Fields, f => f.Name == "Reference");
+
+        var updateCommand = feature.Commands.Single(c => c.Name == "UpdateInvoice");
+        Assert.Contains(updateCommand.Fields, f => f.Name == "Reference");
+
+        // Delete only ever carries Id — the new field must not leak in.
+        var deleteCommand = feature.Commands.Single(c => c.Name == "DeleteInvoice");
+        Assert.DoesNotContain(deleteCommand.Fields, f => f.Name == "Reference");
+
+        var getById = feature.Queries.Single(q => q.Name == "GetInvoiceById");
+        Assert.Contains(getById.ResultFields, f => f.Name == "Reference");
+
+        var getAll = feature.Queries.Single(q => q.Name == "GetAllInvoices");
+        Assert.Contains(getAll.ResultFields, f => f.Name == "Reference");
+    }
 }

@@ -1,3 +1,4 @@
+using ArchitectLuna.Core.Model;
 using ArchitectLuna.Template.Tests.Infrastructure;
 using Xunit;
 
@@ -24,10 +25,10 @@ public sealed class FeatureGenerationSnapshotTests
 
         var expected = new[]
         {
-            $"{Slice}/CreateInvoiceRequest.cs",
+            $"{Slice}/Contracts/CreateInvoiceRequest.cs",
             $"{Slice}/CreateInvoiceCommand.cs",
             $"{Slice}/CreateInvoiceResult.cs",
-            $"{Slice}/CreateInvoiceResponse.cs",
+            $"{Slice}/Contracts/CreateInvoiceResponse.cs",
             $"{Slice}/CreateInvoiceValidator.cs",
             $"{Slice}/CreateInvoiceHandler.cs",
             $"{Slice}/CreateInvoiceMappings.cs",
@@ -114,6 +115,65 @@ public sealed class FeatureGenerationSnapshotTests
 
         Assert.Contains("AbstractValidator<CreateInvoiceCommand>", validator);
         Assert.Contains("RuleFor(x => x.AmountCents).GreaterThan(0);", validator);
-        Assert.Contains("RuleFor(x => x.Currency).MaximumLength(3);", validator);
+        // Currency gets the field-type default (NotEmpty, string) plus the name-based default
+        // (MaximumLength(3), name contains "currency") plus the explicit --rule, deduplicated.
+        Assert.Contains("RuleFor(x => x.Currency).NotEmpty().MaximumLength(3);", validator);
+    }
+
+    [Theory]
+    [InlineData("mediatr")]
+    [InlineData("wolverine")]
+    public void Validator_AppliesFieldTypeDefaultsEvenWithoutExplicitRules(string adapter)
+    {
+        var files = GenerationTestHarness.GenerateFeature(
+            GenerationTestHarness.VerticalSliceContext(), adapter, "in-memory", GenerationTestHarness.InvoiceFeature());
+        var validator = GenerationTestHarness.ContentOf(files, $"{Slice}/CreateInvoiceValidator.cs");
+
+        // CustomerId (Guid, no explicit rules) still gets a sensible default.
+        Assert.Contains("RuleFor(x => x.CustomerId).NotEmpty();", validator);
+    }
+
+    [Theory]
+    [InlineData("mediatr")]
+    [InlineData("wolverine")]
+    public void Validator_HasNoBlankLinesFromSkippedFieldsOrRules(string adapter)
+    {
+        var files = GenerationTestHarness.GenerateFeature(
+            GenerationTestHarness.VerticalSliceContext(), adapter, "in-memory", GenerationTestHarness.InvoiceFeature());
+        var validator = GenerationTestHarness.ContentOf(files, $"{Slice}/CreateInvoiceValidator.cs");
+
+        Assert.DoesNotContain("\n\n\n", validator);
+        Assert.DoesNotContain("        \n", validator);
+    }
+
+    [Theory]
+    [InlineData("mediatr")]
+    [InlineData("wolverine")]
+    public void Validator_SkipsRuleForClauseCleanlyWhenAFieldHasNoRulesAtAll(string adapter)
+    {
+        var persistence = GenerationTestHarness.Persistence("in-memory");
+        var adapterInstance = GenerationTestHarness.Adapter(adapter, persistence);
+        var feature = new FeatureModel
+        {
+            Name = "Invoices",
+            Commands =
+            {
+                new CommandModel
+                {
+                    Name = "ArchiveInvoice",
+                    Kind = CommandKind.Update,
+                    Fields = { new FieldModel { Name = "Silent", Type = "bool" } },
+                },
+            },
+        };
+
+        var files = adapterInstance.GenerateCommand(GenerationTestHarness.VerticalSliceContext(), feature, feature.Commands[0]);
+        var validator = files.Single(f => f.RelativePath.EndsWith("ArchiveInvoiceValidator.cs")).Content;
+
+        // A bool field gets no default and has no explicit rule, so the whole RuleFor clause
+        // must be skipped without leaving a blank line behind (docs/requirements/003-improvements.md §4).
+        Assert.DoesNotContain("RuleFor", validator);
+        Assert.DoesNotContain("\n\n\n", validator);
+        Assert.DoesNotContain("        \n", validator);
     }
 }

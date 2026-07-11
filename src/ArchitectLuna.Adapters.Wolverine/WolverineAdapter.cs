@@ -16,10 +16,11 @@ namespace ArchitectLuna.Adapters.Wolverine;
 ///
 /// File placement follows the <see cref="GenerationContext"/> targets: Message/Result/Handler/
 /// Validator/Mappings files go to <see cref="GenerationContext.Application"/>; Request/Response
-/// DTOs go to <see cref="GenerationContext.Contracts"/>; Endpoint files go to
+/// DTOs go to a `Contracts/` subfolder of that same operation slice (never a separate project —
+/// see <see cref="GenerationContext"/>'s doc comment); Endpoint files go to
 /// <see cref="GenerationContext.Api"/>. For vertical slice these are all the same project, so
-/// every file lands in the feature slice; for Clean Architecture they're genuinely separate
-/// projects.
+/// every file lands in the feature slice; for Clean Architecture Application and Api are
+/// genuinely separate projects.
 ///
 /// Handlers return Result&lt;T&gt;; endpoints translate failures via ToProblem() and map success
 /// to 201 (Create), 200 (Update/queries), or 204 (Delete). Handler bodies come from the
@@ -221,7 +222,11 @@ public sealed class WolverineAdapter : IFrameworkAdapter
                 Namespace = slice.ApplicationNamespace,
                 MessageName = names.Message,
                 ValidatorName = names.Validator,
-                Fields = command.Fields.Select(f => new ValidatorFieldRenderModel { Name = f.Name, Rules = f.Rules }).ToList(),
+                Fields = command.Fields.Select(f => new ValidatorFieldRenderModel
+                {
+                    Name = f.Name,
+                    Rules = DefaultValidationRules.DefaultsFor(f).Concat(f.Rules).Distinct().ToList(),
+                }).ToList(),
             };
             files.Add(new GeneratedFile($"{slice.ApplicationPath}/{names.Validator}.cs", RenderShared("Validator.cs.sbn", validatorModel)));
         }
@@ -321,7 +326,7 @@ public sealed class WolverineAdapter : IFrameworkAdapter
                 ? $"{DispatcherParam}.InvokeAsync<{wrappedResultType}>(new {names.Message}(), cancellationToken)"
                 : $"{DispatcherParam}.InvokeAsync<{wrappedResultType}>(query, cancellationToken)";
 
-        var pagedResponseType = $"{context.Contracts.RootNamespace}.Common.PagedResponse<{names.Response}>";
+        var pagedResponseType = $"{context.Api.RootNamespace}.Responses.PagedResponse<{names.Response}>";
 
         var okMethod = apiStyle == ApiStyle.Controllers ? "ToOkActionResponse" : "ToOkResponse";
 
@@ -445,7 +450,11 @@ public sealed class WolverineAdapter : IFrameworkAdapter
         public string Mappings => $"{OperationName}Mappings";
     }
 
-    /// <summary>Where one operation's files live: Application slice, Api slice, Contracts slice.</summary>
+    /// <summary>
+    /// Where one operation's files live: Application slice, Api slice, and a `Contracts/`
+    /// subfolder of the Application slice (docs/requirements/003-improvements.md §2.2-2.3 — DTOs
+    /// live inside the owning slice, never in a separate project).
+    /// </summary>
     private readonly record struct SlicePaths
     {
         public SlicePaths(GenerationContext context, string featureName, string operationName)
@@ -454,8 +463,8 @@ public sealed class WolverineAdapter : IFrameworkAdapter
             ApplicationPath = $"{context.Application.ProjectRoot}/Features/{featureName}/{operationName}";
             EndpointNamespace = $"{context.Api.RootNamespace}.Features.{featureName}.{operationName}";
             EndpointPath = $"{context.Api.ProjectRoot}/Features/{featureName}/{operationName}";
-            ContractsNamespace = $"{context.Contracts.RootNamespace}.Features.{featureName}.{operationName}";
-            ContractsPath = $"{context.Contracts.ProjectRoot}/Features/{featureName}/{operationName}";
+            ContractsNamespace = $"{ApplicationNamespace}.Contracts";
+            ContractsPath = $"{ApplicationPath}/Contracts";
         }
 
         public string ApplicationNamespace { get; }

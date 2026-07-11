@@ -85,7 +85,7 @@ public sealed class CrudGenerationSnapshotTests
             GenerationTestHarness.CleanArchitectureContext(), adapter, "efcore-postgres", GenerationTestHarness.InvoiceFeature());
 
         var create = GenerationTestHarness.ContentOf(files, $"{Api}/Features/Invoices/CreateInvoice/CreateInvoiceEndpoint.cs");
-        Assert.Contains("using BillingService.Contracts.Features.Invoices.CreateInvoice;", create);
+        Assert.Contains("using BillingService.Application.Features.Invoices.CreateInvoice.Contracts;", create);
         Assert.Contains("CreateInvoiceRequest request", create);
         Assert.Contains("request.ToCommand()", create);
         Assert.Contains("result.ToCreatedResponse(", create);

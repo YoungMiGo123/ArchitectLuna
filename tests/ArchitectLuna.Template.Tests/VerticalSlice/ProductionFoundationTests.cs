@@ -1,4 +1,5 @@
 using ArchitectLuna.Cli.Scaffolding;
+using ArchitectLuna.Core.Model;
 using ArchitectLuna.Template.Tests.Infrastructure;
 using Xunit;
 
@@ -38,7 +39,7 @@ public sealed class ProductionFoundationTests
             $"{Api}/Responses/ApiResponse.cs",
             $"{Api}/Responses/ApiError.cs",
             $"{Api}/Results/ResultExtensions.cs",
-            $"{Api}/Common/PagedResponse.cs",
+            $"{Api}/Responses/PagedResponse.cs",
             $"{Api}/Common/MiddlewareExtensions.cs",
             $"{Api}/Common/EndpointExtensions.cs",
             $"{Api}/Common/LoggingExtensions.cs",
@@ -187,6 +188,18 @@ public sealed class ProductionFoundationTests
         Assert.Contains("IEndpointDefinition", endpoints);
     }
 
+    [Fact]
+    public void ExceptionMiddleware_HandlesDbUpdateConcurrencyAsConflictAndDbUpdateAsLoggedFailure()
+    {
+        var files = FoundationFiles.BuildAll(GenerationTestHarness.VerticalSliceContext(), "mediatr");
+        var middleware = GenerationTestHarness.ContentOf(files, $"{Api}/Common/ExceptionHandlingMiddleware.cs");
+
+        Assert.Contains("DbUpdateConcurrencyException", middleware);
+        Assert.Contains("StatusCodes.Status409Conflict", middleware);
+        Assert.Contains("DbUpdateException", middleware);
+        Assert.Contains("Database update failed", middleware);
+    }
+
     [Theory]
     [InlineData("mediatr", "AddMediatR", true)]
     [InlineData("mediatr", "AddValidatorsFromAssembly", true)]
@@ -283,5 +296,53 @@ public sealed class ProductionFoundationTests
 
         var registration = GenerationTestHarness.ContentOf(files, $"{Api}/ApiDependencyInjection.cs");
         Assert.Contains("services.AddScoped<IUserContext, HttpUserContext>();", registration);
+    }
+
+    [Fact]
+    public void OnStartupApplyMode_EfCore_RegistersDatabaseInitializerHostedService()
+    {
+        var context = GenerationTestHarness.VerticalSliceContext();
+        var files = GenerationTestHarness.PersistenceSolutionFiles(context, "efcore-postgres", GenerationTestHarness.InvoiceFeature(), DatabaseApplyMode.OnStartup);
+        var registration = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/PersistenceRegistration.cs");
+
+        Assert.Contains("services.AddHostedService<DatabaseInitializer>();", registration);
+    }
+
+    [Theory]
+    [InlineData(DatabaseApplyMode.Manual)]
+    [InlineData(DatabaseApplyMode.OnGenerate)]
+    public void NonStartupApplyMode_EfCore_DoesNotRegisterDatabaseInitializerHostedService(DatabaseApplyMode applyMode)
+    {
+        var context = GenerationTestHarness.VerticalSliceContext();
+        var files = GenerationTestHarness.PersistenceSolutionFiles(context, "efcore-postgres", GenerationTestHarness.InvoiceFeature(), applyMode);
+        var registration = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/PersistenceRegistration.cs");
+
+        Assert.DoesNotContain("services.AddHostedService<DatabaseInitializer>();", registration);
+        // Readiness reporting is independent of apply mode.
+        Assert.Contains("AddCheck<DatabaseHealthCheck>(\"database\", tags: new[] { \"ready\" })", registration);
+    }
+
+    [Fact]
+    public void OnStartupApplyMode_MartenSetsAutoCreateSchemaObjectsToAllAndAppliesOnStartup()
+    {
+        var context = GenerationTestHarness.VerticalSliceContext();
+        var files = GenerationTestHarness.PersistenceSolutionFiles(context, "marten", GenerationTestHarness.InvoiceFeature(), DatabaseApplyMode.OnStartup);
+        var content = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/PersistenceRegistration.cs");
+
+        Assert.Contains("options.AutoCreateSchemaObjects = JasperFx.AutoCreate.All;", content);
+        Assert.Contains("ApplyAllDatabaseChangesOnStartup()", content);
+    }
+
+    [Theory]
+    [InlineData(DatabaseApplyMode.Manual)]
+    [InlineData(DatabaseApplyMode.OnGenerate)]
+    public void NonStartupApplyMode_MartenLeavesAutoCreateSchemaObjectsAtCreateOrUpdateAndDoesNotApplyOnStartup(DatabaseApplyMode applyMode)
+    {
+        var context = GenerationTestHarness.VerticalSliceContext();
+        var files = GenerationTestHarness.PersistenceSolutionFiles(context, "marten", GenerationTestHarness.InvoiceFeature(), applyMode);
+        var content = GenerationTestHarness.ContentOf(files, "src/BillingService.Api/Persistence/PersistenceRegistration.cs");
+
+        Assert.Contains("options.AutoCreateSchemaObjects = JasperFx.AutoCreate.CreateOrUpdate;", content);
+        Assert.DoesNotContain("ApplyAllDatabaseChangesOnStartup()", content);
     }
 }

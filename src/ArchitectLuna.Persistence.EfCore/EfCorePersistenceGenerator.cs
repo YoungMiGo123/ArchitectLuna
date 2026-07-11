@@ -39,21 +39,19 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
 
     public string Name => _kind == EfCoreProviderKind.Postgres ? "efcore-postgres" : "efcore-sqlserver";
 
-    // The startup DatabaseInitializer applies migrations when any exist and otherwise EnsureCreated,
-    // so the app is runnable against a real database immediately. Migrations are an opt-in
-    // production step (add `Microsoft.EntityFrameworkCore.Design` + `dotnet ef migrations add`); the
-    // initializer's Migrate/EnsureCreated/GetMigrations APIs live in EF Core Relational, not Design.
-    // Design is deliberately NOT scaffolded by default: as a `PrivateAssets=all` development
-    // dependency it pins EF Core's Relational assembly to Microsoft's latest patch while the Npgsql
-    // provider tracks its own, and the private version never reaches the startup project's runtime
-    // output — an app that compiles but throws a Relational FileNotFoundException at startup.
+    // Microsoft.EntityFrameworkCore.Design goes on the same project as the concrete DbContext
+    // (Infrastructure, or the Api project itself for vertical slice) — that's the project
+    // `dotnet ef migrations add --project ...` targets, and EF's tooling refuses to run without
+    // this package referenced there (docs/requirements/003-improvements.md §10.1). Added via the
+    // same `dotnet add package` flow as every other scaffolded dependency (no explicit pin), so it
+    // resolves to a version compatible with the Relational/provider packages added alongside it.
     // The Hosting/HealthChecks abstractions are needed because — under Clean Architecture — the
     // generated DatabaseInitializer (IHostedService) and DatabaseHealthCheck (IHealthCheck) live in
     // the Infrastructure *class library*, which doesn't get them from the web framework the way the
     // single-project vertical-slice layout does.
     public IReadOnlyList<string> RequiredPackages => _kind == EfCoreProviderKind.Postgres
-        ? new[] { "Microsoft.EntityFrameworkCore", "Npgsql.EntityFrameworkCore.PostgreSQL", "Microsoft.Extensions.Hosting.Abstractions", "Microsoft.Extensions.Diagnostics.HealthChecks" }
-        : new[] { "Microsoft.EntityFrameworkCore", "Microsoft.EntityFrameworkCore.SqlServer", "Microsoft.Extensions.Hosting.Abstractions", "Microsoft.Extensions.Diagnostics.HealthChecks" };
+        ? new[] { "Microsoft.EntityFrameworkCore", "Npgsql.EntityFrameworkCore.PostgreSQL", "Microsoft.EntityFrameworkCore.Design", "Microsoft.Extensions.Hosting.Abstractions", "Microsoft.Extensions.Diagnostics.HealthChecks" }
+        : new[] { "Microsoft.EntityFrameworkCore", "Microsoft.EntityFrameworkCore.SqlServer", "Microsoft.EntityFrameworkCore.Design", "Microsoft.Extensions.Hosting.Abstractions", "Microsoft.Extensions.Diagnostics.HealthChecks" };
 
     // Handler bodies (dbContext.Add/Find/Remove/SaveChangesAsync) and, under Clean Architecture,
     // the I{Solution}DbContext interface's DbSet<T> properties both live in Application — neither
@@ -72,7 +70,7 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         };
     }
 
-    public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities)
+    public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities, DatabaseApplyMode applyMode)
     {
         // Always emits the DbContext (even with zero DbSets) rather than only once an entity
         // exists: the generated AddInfrastructure references this type unconditionally as soon as
@@ -81,9 +79,10 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         var files = new List<GeneratedFile>
         {
             new($"{context.Infrastructure.ProjectRoot}/{DbContextName(context)}.cs", RenderDbContext(context, entities)),
+            new($"{context.Infrastructure.ProjectRoot}/Persistence/{DbContextName(context)}Factory.cs", RenderDbContextFactory(context)),
             new($"{context.Infrastructure.ProjectRoot}/DatabaseInitializer.cs", RenderDatabaseInitializer(context)),
             new($"{context.Infrastructure.ProjectRoot}/DatabaseHealthCheck.cs", RenderDatabaseHealthCheck(context)),
-            new($"{context.Infrastructure.ProjectRoot}/PersistenceRegistration.cs", RenderAddPersistence(context)),
+            new($"{context.Infrastructure.ProjectRoot}/PersistenceRegistration.cs", RenderAddPersistence(context, applyMode)),
         };
 
         if (context.HasSeparateInfrastructure)
@@ -126,7 +125,7 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         return new HandlerBinding(body, DependencyTypeName(context), "dbContext", HandlerUsings(context));
     }
 
-    private string RenderAddPersistence(GenerationContext context)
+    private string RenderAddPersistence(GenerationContext context, DatabaseApplyMode applyMode)
     {
         var dbContextName = DbContextName(context);
         // EnableRetryOnFailure: standard production resilience against transient DB faults.
@@ -154,8 +153,17 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
             lines.Add($"        services.AddScoped<{DbContextInterfaceName(context)}>(sp => sp.GetRequiredService<{dbContextName}>());");
         }
 
-        // Create/apply the schema at startup, and expose DB reachability as a readiness check.
-        lines.Add("        services.AddHostedService<DatabaseInitializer>();");
+        // Only "on-startup" registers the hosted service that migrates/EnsureCreates automatically
+        // at process start (docs/requirements/003-improvements.md §9, §11) — "manual" and
+        // "on-generate" apply schema changes explicitly instead (a developer running migrations by
+        // hand, or `generate` itself shelling out to `dotnet ef database update`), so a stray
+        // deploy never mutates a shared database without the operator asking for it.
+        if (applyMode == DatabaseApplyMode.OnStartup)
+        {
+            lines.Add("        services.AddHostedService<DatabaseInitializer>();");
+        }
+
+        // Readiness reporting is independent of apply mode — always useful to know the database is reachable.
         lines.Add("        services.AddHealthChecks().AddCheck<DatabaseHealthCheck>(\"database\", tags: new[] { \"ready\" });");
 
         var usingBlock = string.Join("\n", usings.Distinct().Select(u => $"using {u};"));
@@ -169,7 +177,8 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         /// <summary>
         /// Everything EF Core persistence registers: the DbContext (with connection resilience),
         /// the Application-owned DbContext interface mapping (Clean Architecture), a startup schema
-        /// initializer, and a database readiness health check. Regenerated on every `generate`.
+        /// initializer (only when database.applyMode is "on-startup"), and a database readiness
+        /// health check. Regenerated on every `generate`.
         /// </summary>
         public static class PersistenceRegistration
         {
@@ -378,6 +387,48 @@ public sealed class EfCorePersistenceGenerator : IPersistenceGenerator
         sb.AppendLine("    }");
         sb.Append('}');
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Lets EF Core tooling create a <c>DbContext</c> without going through the app's runtime DI
+    /// container (docs/requirements/003-improvements.md §10.2) — without this, `dotnet ef
+    /// migrations add`/`database update` fail trying to resolve `DbContextOptions&lt;T&gt;` from a
+    /// container that only exists once `WebApplication.CreateBuilder` runs. Uses the same local
+    /// development connection string shape as the scaffolded appsettings.Development.json; pass
+    /// `--connection` to `dotnet ef` to target a different database.
+    /// </summary>
+    private string RenderDbContextFactory(GenerationContext context)
+    {
+        var dbContextName = DbContextName(context);
+        var localConnectionString = _kind == EfCoreProviderKind.Postgres
+            ? $"Host=localhost;Database={context.RootNamespace.ToLowerInvariant()};Username=postgres;Password=postgres"
+            : $"Server=localhost;Database={context.RootNamespace};Trusted_Connection=True;TrustServerCertificate=True";
+        var useCall = _kind == EfCoreProviderKind.Postgres
+            ? $"optionsBuilder.UseNpgsql(\"{localConnectionString}\")"
+            : $"optionsBuilder.UseSqlServer(\"{localConnectionString}\")";
+
+        return $$"""
+        using Microsoft.EntityFrameworkCore;
+        using Microsoft.EntityFrameworkCore.Design;
+        using {{context.Infrastructure.RootNamespace}};
+
+        namespace {{context.Infrastructure.RootNamespace}}.Persistence;
+
+        /// <summary>
+        /// Design-time factory so `dotnet ef migrations add`/`database update` can create a
+        /// {{dbContextName}} without the app's runtime DI container. Uses the local development
+        /// connection string; pass --connection to target a different database.
+        /// </summary>
+        public sealed class {{dbContextName}}Factory : IDesignTimeDbContextFactory<{{dbContextName}}>
+        {
+            public {{dbContextName}} CreateDbContext(string[] args)
+            {
+                var optionsBuilder = new DbContextOptionsBuilder<{{dbContextName}}>();
+                {{useCall}};
+                return new {{dbContextName}}(optionsBuilder.Options);
+            }
+        }
+        """;
     }
 
     private static string RenderCreateBody(EntityModel entity, string resultName, string dbSetName)

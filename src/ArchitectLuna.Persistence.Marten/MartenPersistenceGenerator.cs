@@ -43,11 +43,11 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         return new[] { new GeneratedFile(documentPath, RenderDocumentClass(context, entity)) };
     }
 
-    public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities) =>
+    public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities, DatabaseApplyMode applyMode) =>
         new[]
         {
             new GeneratedFile($"{context.Infrastructure.ProjectRoot}/MartenHealthCheck.cs", RenderMartenHealthCheck(context)),
-            new GeneratedFile($"{context.Infrastructure.ProjectRoot}/PersistenceRegistration.cs", RenderAddPersistence(context, entities)),
+            new GeneratedFile($"{context.Infrastructure.ProjectRoot}/PersistenceRegistration.cs", RenderAddPersistence(context, entities, applyMode)),
         };
 
     public HandlerBinding BindCommandHandler(GenerationContext context, FeatureModel feature, EntityModel entity, CommandModel command)
@@ -78,7 +78,7 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
         return new HandlerBinding(body, "IDocumentSession", "session", HandlerUsings(context));
     }
 
-    private static string RenderAddPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities)
+    private static string RenderAddPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities, DatabaseApplyMode applyMode)
     {
         var usings = new List<string>
         {
@@ -97,11 +97,22 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
             .ToList();
         var registrationBlock = registrations.Count > 0 ? "\n" + string.Join("\n", registrations) : string.Empty;
 
+        // Fully qualified: StoreOptions.AutoCreateSchemaObjects is JasperFx.AutoCreate (moved out
+        // of the Marten package itself in Marten 9.x), not Marten.AutoCreate — qualifying avoids
+        // needing a "using JasperFx;" the caller may not otherwise have any reason to add.
+        // manual/on-generate leave Marten's default (only creates schema objects that don't exist
+        // yet, applied lazily on first use — no automatic startup mutation of a shared database);
+        // on-startup additionally allows Marten to update existing schema objects and applies them
+        // eagerly via ApplyAllDatabaseChangesOnStartup (docs/requirements/003-improvements.md §11).
+        var autoCreate = applyMode == DatabaseApplyMode.OnStartup ? "JasperFx.AutoCreate.All" : "JasperFx.AutoCreate.CreateOrUpdate";
+        var applyOnStartupCall = applyMode == DatabaseApplyMode.OnStartup ? ".ApplyAllDatabaseChangesOnStartup()" : string.Empty;
+
         var usingBlock = string.Join("\n", usings.Distinct().Select(u => $"using {u};"));
 
         // RegisterDocumentType makes Marten aware of every generated document up front;
-        // ApplyAllDatabaseChangesOnStartup creates/updates each document's table at startup, so a
-        // freshly generated solution has its schema without any manual migration step.
+        // ApplyAllDatabaseChangesOnStartup (when database.applyMode is "on-startup") creates/
+        // updates each document's table at startup, so a freshly generated solution has its schema
+        // without any manual migration step.
         return $$"""
         {{usingBlock}}
 
@@ -109,8 +120,9 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
 
         /// <summary>
         /// Everything Marten persistence registers: the document store (with every generated
-        /// document type registered), startup schema application, and a database readiness health
-        /// check. Regenerated on every `generate` so newly added documents are registered.
+        /// document type registered), startup schema application (only when database.applyMode is
+        /// "on-startup"), and a database readiness health check. Regenerated on every `generate` so
+        /// newly added documents are registered.
         /// </summary>
         public static class PersistenceRegistration
         {
@@ -119,7 +131,8 @@ public sealed class MartenPersistenceGenerator : IPersistenceGenerator
                 services.AddMarten(options =>
                 {
                     options.Connection(configuration.GetConnectionString("Default")!);{{registrationBlock}}
-                }).ApplyAllDatabaseChangesOnStartup();
+                    options.AutoCreateSchemaObjects = {{autoCreate}};
+                }){{applyOnStartupCall}};
 
                 services.AddHealthChecks().AddCheck<MartenHealthCheck>("database", tags: new[] { "ready" });
                 return services;

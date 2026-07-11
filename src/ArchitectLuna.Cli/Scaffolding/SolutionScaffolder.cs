@@ -14,8 +14,9 @@ namespace ArchitectLuna.Cli.Scaffolding;
 ///
 /// Produces a solution that compiles and runs immediately, in either layout:
 /// <see cref="SolutionLayout.VerticalSlice"/> (one Api project, features live inside it) or
-/// <see cref="SolutionLayout.CleanArchitecture"/> (Api/Application/Domain/Infrastructure/Contracts
-/// as five real projects, dependency rule pointing inward) — both get the full production
+/// <see cref="SolutionLayout.CleanArchitecture"/> (Api/Application/Domain/Infrastructure as four
+/// real projects, dependency rule pointing inward — Request/Response DTOs live in a `Contracts/`
+/// subfolder of each Application feature slice, not a separate project) — both get the full production
 /// foundation (<see cref="FoundationFiles"/>): Result pattern, BaseEntity, user-context and
 /// date/time abstractions, correlation-ID + exception middleware, Serilog request logging,
 /// Swagger, health checks, DI/endpoint/middleware extension methods, Docker, docs, and test
@@ -23,7 +24,7 @@ namespace ArchitectLuna.Cli.Scaffolding;
 /// </summary>
 public static class SolutionScaffolder
 {
-    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "in-memory", SolutionLayout layout = SolutionLayout.CleanArchitecture, ApiStyle apiStyle = ApiStyle.MinimalApi)
+    public static string Scaffold(string parentDirectory, string solutionName, string adapterName, string persistenceName = "in-memory", SolutionLayout layout = SolutionLayout.CleanArchitecture, ApiStyle apiStyle = ApiStyle.MinimalApi, bool format = true, DatabaseApplyMode applyMode = DatabaseApplyMode.Manual)
     {
         var root = Path.Combine(parentDirectory, solutionName);
         if (Directory.Exists(root))
@@ -40,8 +41,8 @@ public static class SolutionScaffolder
         File.WriteAllText(Path.Combine(root, "Directory.Build.props"), ProjectFiles.DirectoryBuildProps);
 
         var (apiCsprojRelative, context) = layout == SolutionLayout.CleanArchitecture
-            ? ScaffoldCleanArchitecture(root, solutionName, adapterName, adapter, persistence)
-            : ScaffoldVerticalSlice(root, solutionName, adapterName, adapter, persistence);
+            ? ScaffoldCleanArchitecture(root, solutionName, adapterName, adapter, persistence, applyMode)
+            : ScaffoldVerticalSlice(root, solutionName, adapterName, adapter, persistence, applyMode);
 
         // The production foundation: Result pattern, BaseEntity, abstractions, middleware, and
         // the extension methods Program.cs is built from. Scaffold-time only — `generate` never
@@ -52,13 +53,13 @@ public static class SolutionScaffolder
         // references the DbContext/store type as soon as persistence is configured, so it must
         // already exist (with zero DbSets — `generate` re-renders it with real ones once entities
         // are added).
-        WriteGeneratedFiles(root, persistence.GenerateSolutionPersistence(context, Array.Empty<EntityReference>()));
+        WriteGeneratedFiles(root, persistence.GenerateSolutionPersistence(context, Array.Empty<EntityReference>(), applyMode));
 
         File.WriteAllText(Path.Combine(root, "Dockerfile"), InfrastructureFiles.Dockerfile(solutionName));
         File.WriteAllText(Path.Combine(root, "docker-compose.yml"), InfrastructureFiles.DockerCompose(solutionName, persistenceProvider));
         File.WriteAllText(Path.Combine(root, ".gitignore"), InfrastructureFiles.GitIgnoreContent);
         File.WriteAllText(Path.Combine(root, ".editorconfig"), InfrastructureFiles.EditorConfig());
-        File.WriteAllText(Path.Combine(root, "README.md"), InfrastructureFiles.ReadMe(solutionName, adapterName, persistenceName, layout));
+        File.WriteAllText(Path.Combine(root, "README.md"), InfrastructureFiles.ReadMe(solutionName, adapterName, persistenceName, layout, applyMode));
 
         Directory.CreateDirectory(Path.Combine(root, "docs"));
         File.WriteAllText(Path.Combine(root, "docs", "architecture.md"), InfrastructureFiles.ArchitectureDoc(solutionName, adapterName, persistenceName, layout));
@@ -71,6 +72,7 @@ public static class SolutionScaffolder
             Namespace = solutionName,
             Adapter = adapterName,
             Persistence = persistenceProvider,
+            Database = new DatabaseSettings { ApplyMode = applyMode },
             Layout = layout,
             ApiStyle = apiStyle,
             Features = new List<FeatureModel>(),
@@ -86,7 +88,30 @@ public static class SolutionScaffolder
 
         TestProjectScaffolder.CreateApiTests(root, solutionName, apiCsprojRelative);
 
+        if (format)
+        {
+            TryRunDotnetFormat(root, solutionName);
+        }
+
         return root;
+    }
+
+    /// <summary>
+    /// Best-effort `dotnet format` over the whole solution. Never throws: a formatting failure
+    /// (e.g. `dotnet format` unavailable, or a transient restore issue) must not fail scaffolding
+    /// or generation, since the files it would have reformatted are already valid, buildable
+    /// output — formatting is a polish step, not a correctness gate.
+    /// </summary>
+    internal static void TryRunDotnetFormat(string root, string solutionName)
+    {
+        try
+        {
+            RunDotnet(root, "format", $"{solutionName}.sln", "--verbosity", "quiet");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Warning: 'dotnet format' failed and was skipped: {ex.Message}");
+        }
     }
 
     private static void WriteGeneratedFiles(string root, IReadOnlyList<GeneratedFile> files)
@@ -99,7 +124,7 @@ public static class SolutionScaffolder
         }
     }
 
-    private static (string ApiCsprojRelative, GenerationContext Context) ScaffoldVerticalSlice(string root, string solutionName, string adapterName, IFrameworkAdapter adapter, IPersistenceGenerator persistence)
+    private static (string ApiCsprojRelative, GenerationContext Context) ScaffoldVerticalSlice(string root, string solutionName, string adapterName, IFrameworkAdapter adapter, IPersistenceGenerator persistence, DatabaseApplyMode applyMode)
     {
         var apiProjectRelative = Path.Combine("src", $"{solutionName}.Api");
         var apiProjectDir = Path.Combine(root, apiProjectRelative);
@@ -122,25 +147,19 @@ public static class SolutionScaffolder
         return (apiCsprojRelative, context);
     }
 
-    private static (string ApiCsprojRelative, GenerationContext Context) ScaffoldCleanArchitecture(string root, string solutionName, string adapterName, IFrameworkAdapter adapter, IPersistenceGenerator persistence)
+    private static (string ApiCsprojRelative, GenerationContext Context) ScaffoldCleanArchitecture(string root, string solutionName, string adapterName, IFrameworkAdapter adapter, IPersistenceGenerator persistence, DatabaseApplyMode applyMode)
     {
         var apiRelative = $"src/{solutionName}.Api";
         var applicationRelative = $"src/{solutionName}.Application";
         var domainRelative = $"src/{solutionName}.Domain";
         var infrastructureRelative = $"src/{solutionName}.Infrastructure";
-        var contractsRelative = $"src/{solutionName}.Contracts";
 
-        var context = GenerationContext.ForCleanArchitecture(solutionName, apiRelative, applicationRelative, domainRelative, infrastructureRelative, contractsRelative);
+        var context = GenerationContext.ForCleanArchitecture(solutionName, apiRelative, applicationRelative, domainRelative, infrastructureRelative);
 
         var domainDir = Path.Combine(root, domainRelative);
         Directory.CreateDirectory(domainDir);
         var domainCsprojPath = Path.Combine(domainDir, $"{solutionName}.Domain.csproj");
         File.WriteAllText(domainCsprojPath, ProjectFiles.ClassLibrary());
-
-        var contractsDir = Path.Combine(root, contractsRelative);
-        Directory.CreateDirectory(contractsDir);
-        var contractsCsprojPath = Path.Combine(contractsDir, $"{solutionName}.Contracts.csproj");
-        File.WriteAllText(contractsCsprojPath, ProjectFiles.ClassLibrary());
 
         var applicationDir = Path.Combine(root, applicationRelative);
         Directory.CreateDirectory(applicationDir);
@@ -148,7 +167,6 @@ public static class SolutionScaffolder
         File.WriteAllText(applicationCsprojPath, ProjectFiles.ClassLibrary(new[]
         {
             $"../{solutionName}.Domain/{solutionName}.Domain.csproj",
-            $"../{solutionName}.Contracts/{solutionName}.Contracts.csproj",
         }));
 
         var infrastructureDir = Path.Combine(root, infrastructureRelative);
@@ -167,14 +185,12 @@ public static class SolutionScaffolder
         {
             $"../{solutionName}.Application/{solutionName}.Application.csproj",
             $"../{solutionName}.Infrastructure/{solutionName}.Infrastructure.csproj",
-            $"../{solutionName}.Contracts/{solutionName}.Contracts.csproj",
         }));
         WriteApiProjectFiles(apiDir, context, adapterName, PersistenceRegistry.ParseProvider(persistence.Name));
 
         foreach (var (relative, csprojPath) in new[]
         {
             (domainRelative, domainCsprojPath),
-            (contractsRelative, contractsCsprojPath),
             (applicationRelative, applicationCsprojPath),
             (infrastructureRelative, infrastructureCsprojPath),
             (apiRelative, apiCsprojPath),

@@ -6,10 +6,10 @@ public sealed class {{ validator_name }} : AbstractValidator<{{ message_name }}>
 {
     public {{ validator_name }}()
     {
-        {{ for field in fields }}
-        {{ if field.rules.size > 0 }}
+        {{~ for field in fields ~}}
+        {{~ if field.rules.size > 0 ~}}
         RuleFor(x => x.{{ field.name }}){{ for rule in field.rules }}.{{ rule }}{{ end }};
-        {{ end }}
-        {{ end }}
+        {{~ end ~}}
+        {{~ end ~}}
     }
 }

@@ -29,8 +29,9 @@
    an adapter returns a list of `GeneratedFile` (relative path + rendered content) — it does no
    file I/O itself. Per operation, an adapter emits the message record, the `{Op}Result` record,
    the handler (returning `Result<{Op}Result>`), the FluentValidation validator (body-carrying
-   commands only), `{Op}Request`/`{Op}Response` DTOs (to the Contracts target), explicit
-   extension-method mappings (`{Op}Mappings`), and the endpoint. Endpoints translate a failed
+   commands only), `{Op}Request`/`{Op}Response` DTOs (to a `Contracts/` subfolder of the owning
+   operation's own Application slice — never a separate project, see the Layout section below),
+   explicit extension-method mappings (`{Op}Mappings`), and the endpoint. Endpoints translate a failed
    result via the scaffolded `ResultHttpExtensions.ToProblem()` and map success to 201 (Create),
    200 (Update/queries), or 204 (Delete).
 5. **Route inference** — `RouteInference` (`ArchitectLuna.Core/Naming/RouteInference.cs`) is
@@ -70,21 +71,23 @@
 ## Layout: `GenerationContext` and the vertical-slice/Clean-Architecture split
 
 `GenerationContext` (`ArchitectLuna.Core/Generation/GenerationContext.cs`) is the seam that lets one
-model produce either output shape. It carries five independent `ProjectTarget`s (project root path +
-namespace) — `Api`, `Application`, `Domain`, `Infrastructure`, `Contracts` — instead of a single
-project root. Adapters and persistence generators never branch on layout directly; they always ask
-"where does the Application target live" or "where does the Contracts target live" and get the
-right answer:
+model produce either output shape. It carries four independent `ProjectTarget`s (project root path +
+namespace) — `Api`, `Application`, `Domain`, `Infrastructure` — instead of a single project root.
+Adapters and persistence generators never branch on layout directly; they always ask "where does
+the Application target live" and get the right answer. There is no `Contracts` target: per
+docs/requirements/003-improvements.md §2.2-2.3, Request/Response DTOs live under a `Contracts/`
+subfolder of the owning operation's own Application slice
+(`Application/Features/{Feature}/{Op}/Contracts/`) in both layouts — each adapter's `SlicePaths`
+helper derives that path from `Application` itself, so it never needed to be a distinct project.
 
 - **`GenerationContext.ForVerticalSlice`** collapses everything into one physical project:
-  `Api`/`Application`/`Contracts` all resolve to the Api project root (so Request/Response DTOs
-  stay inside their feature slice); `Domain`/`Infrastructure` both resolve to a `Persistence`
-  sub-namespace/folder inside it.
+  `Api`/`Application` resolve to the Api project root; `Domain`/`Infrastructure` both resolve to a
+  `Persistence` sub-namespace/folder inside it.
 - **`GenerationContext.ForCleanArchitecture`** points each target at a genuinely separate project
-  (`src/{Solution}.Api`, `.Application`, `.Domain`, `.Infrastructure`, `.Contracts`), dependency
-  rule pointing inward: entities go to Domain, messages/handlers/validators/mappings to
-  Application, Request/Response DTOs to Contracts (referenced by Application and Api, referencing
-  nothing), EF configs/DbContext to Infrastructure, endpoints stay in Api.
+  (`src/{Solution}.Api`, `.Application`, `.Domain`, `.Infrastructure`), dependency rule pointing
+  inward: entities go to Domain, messages/handlers/validators/mappings/Contracts DTOs to
+  Application, EF configs/DbContext to Infrastructure, endpoints stay in Api (which references
+  Application's Contracts types, never defines its own).
 
 `GenerationContext.HasSeparateInfrastructure` (true only for Clean Architecture) is the signal EF
 Core's persistence generator uses to avoid an illegal `Application → Infrastructure` project

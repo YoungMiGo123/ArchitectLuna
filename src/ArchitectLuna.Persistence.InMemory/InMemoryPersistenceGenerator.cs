@@ -50,7 +50,7 @@ public sealed class InMemoryPersistenceGenerator : IPersistenceGenerator
         return new[] { new GeneratedFile(entityPath, RenderEntityClass(context, entity)) };
     }
 
-    public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities)
+    public IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities, DatabaseApplyMode applyMode)
     {
         // Always emits the store (it's generic — Save<T>/Find<T>/etc. — so it needs no per-entity
         // content) rather than only once an entity exists: the generated AddPersistence references

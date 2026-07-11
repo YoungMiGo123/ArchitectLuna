@@ -132,7 +132,7 @@ public sealed class CrudGenerationSnapshotTests
         var endpoint = GenerationTestHarness.ContentOf(files, $"{Features}/GetAllInvoices/GetAllInvoicesEndpoint.cs");
         // Collection route preserved; page/pageSize bound via [AsParameters]; paging maps into a typed PagedResponse<T>.
         Assert.Contains("MapGet(\"/api/invoices\"", endpoint);
-        Assert.Contains("new BillingService.Common.PagedResponse<GetAllInvoicesResponse>", endpoint);
+        Assert.Contains("new BillingService.Responses.PagedResponse<GetAllInvoicesResponse>", endpoint);
         Assert.Contains("value.Page, value.PageSize, value.TotalCount", endpoint);
     }
 

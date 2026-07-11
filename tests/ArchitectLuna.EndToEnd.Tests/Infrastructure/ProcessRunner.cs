@@ -1,13 +1,37 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ArchitectLuna.EndToEnd.Tests.Infrastructure;
 
 /// <summary>Result of a shelled-out process run: exit code plus captured stdout/stderr for assertion failure messages.</summary>
-public sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError)
+public sealed partial record ProcessResult(int ExitCode, string StandardOutput, string StandardError)
 {
     public override string ToString() =>
         $"exit code {ExitCode}\n--- stdout ---\n{StandardOutput}\n--- stderr ---\n{StandardError}";
+
+    /// <summary>
+    /// Stdout+stderr with ANSI escape sequences stripped and all whitespace runs (including line
+    /// breaks) collapsed to a single space. Spectre.Console word-wraps markup output to the
+    /// detected console width, which differs by environment (e.g. this sandbox vs. a GitHub
+    /// Actions runner), and re-emits a color escape sequence (e.g. "\x1b[0m\x1b[38;5;9m") at each
+    /// wrap point of a colored line — so a multi-word phrase assertion against the raw output can
+    /// flake not just from an inserted line break but from an invisible-looking escape sequence
+    /// landing inside the exact phrase being checked (collapsing whitespace alone isn't enough:
+    /// the escape bytes themselves aren't whitespace). Assert against this instead of the raw
+    /// strings whenever a check spans more than one word.
+    /// </summary>
+    public string CombinedOutputNormalized()
+    {
+        var withoutAnsi = AnsiEscapePattern().Replace(StandardOutput + " " + StandardError, string.Empty);
+        return WhitespacePattern().Replace(withoutAnsi, " ").Trim();
+    }
+
+    [GeneratedRegex(@"\x1B\[[0-9;]*[a-zA-Z]")]
+    private static partial Regex AnsiEscapePattern();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespacePattern();
 }
 
 /// <summary>Shells out to a process (the built CLI, or `dotnet build`) and captures its result.</summary>

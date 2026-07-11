@@ -38,10 +38,23 @@ public interface IPersistenceGenerator
     /// <summary>
     /// Solution-level file(s) needing visibility across every entity at once — a DbContext with
     /// one DbSet per entity, for example. Called once per `generate` run with every known entity.
-    /// Returns an empty list for providers with nothing solution-level to emit (e.g. Marten,
-    /// which just needs per-call session access, no aggregate registry file).
+    /// Returns an empty list for providers with nothing solution-level to emit.
+    ///
+    /// Provider registration is not spliced into AddInfrastructure line-by-line. Instead each
+    /// provider emits a full `AddPersistence(this IServiceCollection, IConfiguration)` extension
+    /// in its own file from here (so it is regenerated per `generate` with full entity knowledge —
+    /// which Marten needs to RegisterDocumentType per document, and which lets a provider emit a
+    /// startup schema initializer + DB health check). FoundationFiles' AddInfrastructure just
+    /// calls services.AddPersistence(configuration). See each provider's RenderAddPersistence.
+    ///
+    /// <paramref name="applyMode"/> (docs/requirements/003-improvements.md §9, §11) governs
+    /// whether that schema initializer actually runs automatically at process startup
+    /// (<see cref="Model.DatabaseApplyMode.OnStartup"/>) or is generated but left unregistered so
+    /// schema changes are applied only manually or via `generate`'s own `on-generate` step
+    /// (<see cref="Model.DatabaseApplyMode.Manual"/>/<see cref="Model.DatabaseApplyMode.OnGenerate"/>).
+    /// Providers with no schema to apply (in-memory, none) ignore it.
     /// </summary>
-    IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities);
+    IReadOnlyList<GeneratedFile> GenerateSolutionPersistence(GenerationContext context, IReadOnlyList<EntityReference> entities, Model.DatabaseApplyMode applyMode);
 
     /// <summary>
     /// The handler binding for a command targeting the given entity. Only ever called for a
@@ -51,12 +64,4 @@ public interface IPersistenceGenerator
 
     /// <summary>Same as <see cref="BindCommandHandler"/> but for a query handler.</summary>
     HandlerBinding BindQueryHandler(GenerationContext context, FeatureModel feature, EntityModel entity, QueryModel query);
-
-    // Provider registration is no longer spliced into AddInfrastructure line-by-line. Instead each
-    // provider emits a full `AddPersistence(this IServiceCollection, IConfiguration)` extension in
-    // its own file from GenerateSolutionPersistence (so it is regenerated per `generate` with full
-    // entity knowledge — which Marten needs to RegisterDocumentType per document, and which lets a
-    // provider emit a startup schema initializer + DB health check). FoundationFiles'
-    // AddInfrastructure just calls services.AddPersistence(configuration). See each provider's
-    // RenderAddPersistence.
 }

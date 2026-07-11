@@ -15,3 +15,4 @@ delete completed plans — they are the design history of the project.
 | 002 | [Pagination for generated GetAll queries](002-crud-getall-pagination.md) | Done |
 | 003 | [Runnable persistence + schema init](003-runnable-persistence-and-schema-init.md) | Done |
 | 004 | [Standard response envelope + Controller output](004-standard-response-envelope-and-controllers.md) | Done |
+| 005 | [Generation quality, entity sync, and database readiness](005-generation-quality-and-db-readiness.md) | Implemented, full E2E matrix verification pending (see Outcome) |

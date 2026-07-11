@@ -29,7 +29,11 @@ public static class ManifestStore
             .OrderBy(f => f, StringComparer.Ordinal)
             .ToList();
 
-        var normalized = new GenerationManifest { SchemaVersion = manifest.SchemaVersion, GeneratedFiles = sortedFiles };
+        var sortedHashes = manifest.RegionHashes
+            .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+
+        var normalized = new GenerationManifest { SchemaVersion = manifest.SchemaVersion, GeneratedFiles = sortedFiles, RegionHashes = sortedHashes };
         File.WriteAllText(path, JsonSerializer.Serialize(normalized, WriteOptions));
     }
 }

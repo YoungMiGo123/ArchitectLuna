@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using ArchitectLuna.Core.Editing;
 using ArchitectLuna.Core.Yaml;
 using Spectre.Console;
@@ -12,6 +13,11 @@ public sealed class AddCrudCommandSettings : CommandSettings
 
     [CommandArgument(1, "<entity>")]
     public required string Entity { get; init; }
+
+    [CommandOption("--yes|--create-missing")]
+    [Description("Create the feature automatically if it doesn't exist yet, without prompting.")]
+    [DefaultValue(false)]
+    public bool CreateMissing { get; init; }
 }
 
 /// <summary>
@@ -30,6 +36,11 @@ public sealed class AddCrudCommand : Command<AddCrudCommandSettings>
         }
 
         var model = ModelSerializer.Load(modelPath);
+
+        if (!CompoundCommandSupport.TryEnsureFeatureExists(model, settings.Feature, settings.CreateMissing))
+        {
+            return 1;
+        }
 
         var result = ModelEditor.AddCrud(model, settings.Feature, settings.Entity);
         if (!result.Success)

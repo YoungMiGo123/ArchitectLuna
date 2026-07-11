@@ -50,7 +50,7 @@ public static class FoundationFiles
             new($"{context.Api.ProjectRoot}/Responses/ApiResponse.cs", BuildApiResponse(context)),
             new($"{context.Api.ProjectRoot}/Responses/ApiError.cs", BuildApiError(context)),
             new($"{context.Api.ProjectRoot}/Results/ResultExtensions.cs", BuildResultExtensions(context)),
-            new($"{context.Contracts.ProjectRoot}/Common/PagedResponse.cs", BuildPagedResponse(context)),
+            new($"{context.Api.ProjectRoot}/Responses/PagedResponse.cs", BuildPagedResponse(context)),
             new($"{context.Api.ProjectRoot}/Common/MiddlewareExtensions.cs", BuildMiddlewareExtensions(context)),
             new($"{context.Api.ProjectRoot}/Common/EndpointExtensions.cs", BuildEndpointExtensions(context, apiStyle)),
             new($"{context.Api.ProjectRoot}/Common/LoggingExtensions.cs", BuildLoggingExtensions(context)),
@@ -346,8 +346,17 @@ public static class FoundationFiles
         /// ones this middleware produces, must be wrapped, not just Result-pattern failures.
         /// Normal business outcomes flow through the Result pattern, not exceptions — this
         /// middleware covers hand-written code that throws: FluentValidation's ValidationException
-        /// becomes 400, KeyNotFoundException 404, UnauthorizedAccessException 403, and anything
-        /// unhandled is logged and returned as a safe, generic 500.
+        /// becomes 400, KeyNotFoundException 404, UnauthorizedAccessException 403, a concurrency
+        /// conflict (matched by type name, not a hard EF Core reference — see below) becomes 409,
+        /// any other database update failure is logged and returned as a safe 500, and anything
+        /// else unhandled is logged and returned as a safe, generic 500.
+        ///
+        /// EF Core's DbUpdateException/DbUpdateConcurrencyException are matched by
+        /// <c>ex.GetType().Name</c> instead of a `catch (DbUpdateException ex)` clause: the Api
+        /// project doesn't otherwise reference EF Core (that's an Infrastructure/Application
+        /// concern — see docs/ARCHITECTURE.md's layout section), and this middleware is the same
+        /// file for every persistence provider, so it can't special-case EF without either an
+        /// unwanted package reference or generating a second variant of this file.
         /// </summary>
         public sealed class ExceptionHandlingMiddleware
         {
@@ -381,6 +390,17 @@ public static class FoundationFiles
                 catch (UnauthorizedAccessException ex)
                 {
                     await WriteResponse(context, StatusCodes.Status403Forbidden, new ApiError("forbidden", ex.Message, "forbidden"));
+                }
+                catch (Exception ex) when (ex.GetType().Name == "DbUpdateConcurrencyException")
+                {
+                    await WriteResponse(context, StatusCodes.Status409Conflict, new ApiError(
+                        "conflict", "The record was modified or deleted by another process.", "conflict"));
+                }
+                catch (Exception ex) when (ex.GetType().Name == "DbUpdateException")
+                {
+                    _logger.LogError(ex, "Database update failed for {Method} {Path}", context.Request.Method, context.Request.Path);
+                    await WriteResponse(context, StatusCodes.Status500InternalServerError, new ApiError(
+                        "database_error", "A database error occurred.", "unexpected"));
                 }
                 catch (Exception ex)
                 {
@@ -653,7 +673,7 @@ public static class FoundationFiles
     /// </summary>
     public static string BuildPagedResponse(GenerationContext context) =>
         $$"""
-        namespace {{context.Contracts.RootNamespace}}.Common;
+        namespace {{context.Api.RootNamespace}}.Responses;
 
         public sealed record PagedResponse<T>(IReadOnlyList<T> Items, int Page, int PageSize, long TotalCount)
         {

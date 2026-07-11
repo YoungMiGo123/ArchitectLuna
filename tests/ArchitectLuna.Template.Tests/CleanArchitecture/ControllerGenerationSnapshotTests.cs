@@ -39,7 +39,7 @@ public sealed class ControllerGenerationSnapshotTests
             GenerationTestHarness.CleanArchitectureContext(), adapter, "efcore-postgres", GenerationTestHarness.InvoiceFeature(), ApiStyle.Controllers);
 
         var create = GenerationTestHarness.ContentOf(files, $"{Api}/Features/Invoices/CreateInvoice/CreateInvoiceController.cs");
-        Assert.Contains("using BillingService.Contracts.Features.Invoices.CreateInvoice;", create);
+        Assert.Contains("using BillingService.Application.Features.Invoices.CreateInvoice.Contracts;", create);
         Assert.Contains("[ApiController]", create);
         Assert.Contains("[HttpPost(\"/api/invoices\")]", create);
         Assert.Contains("result.ToCreatedActionResponse(", create);

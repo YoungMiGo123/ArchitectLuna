@@ -27,6 +27,22 @@ app.Configure(config =>
         addBranch.AddCommand<AddCrudCommand>("crud");
         addBranch.AddCommand<AddCommandCommand>("command");
         addBranch.AddCommand<AddQueryCommand>("query");
+        addBranch.AddCommand<AddFieldCommand>("field");
+    });
+
+    config.AddBranch("sync", syncBranch =>
+    {
+        syncBranch.AddCommand<SyncEntityCommand>("entity");
+    });
+
+    config.AddBranch("update", updateBranch =>
+    {
+        updateBranch.AddCommand<UpdateEntityCommand>("entity");
+    });
+
+    config.AddBranch("config", configBranch =>
+    {
+        configBranch.AddCommand<ConfigSetCommand>("set");
     });
 
     config.AddCommand<GenerateCommand>("generate");
