@@ -26,11 +26,17 @@ public sealed class NewApiCommandSettings : CommandSettings
     [Description("Solution layout: clean-architecture (default; Api/Application/Domain/Infrastructure/Contracts projects) or vertical-slice (single Api project, features live inside it).")]
     [DefaultValue("clean-architecture")]
     public string Architecture { get; init; } = "clean-architecture";
+
+    [CommandOption("--api-style")]
+    [Description("How generated endpoints are hosted: minimal-api (default) or controllers.")]
+    [DefaultValue("minimal-api")]
+    public string ApiStyle { get; init; } = "minimal-api";
 }
 
 public sealed class NewApiCommand : Command<NewApiCommandSettings>
 {
     private static readonly string[] KnownArchitectures = { "vertical-slice", "clean-architecture" };
+    private static readonly string[] KnownApiStyles = { "minimal-api", "controllers" };
 
     protected override int Execute(CommandContext context, NewApiCommandSettings settings, CancellationToken cancellationToken)
     {
@@ -52,10 +58,17 @@ public sealed class NewApiCommand : Command<NewApiCommandSettings>
             return 1;
         }
 
-        var layout = settings.Architecture == "clean-architecture" ? SolutionLayout.CleanArchitecture : SolutionLayout.VerticalSlice;
+        if (!KnownApiStyles.Contains(settings.ApiStyle))
+        {
+            AnsiConsole.MarkupLineInterpolated($"[red]Unknown api-style '{settings.ApiStyle}'. Valid values: {string.Join(", ", KnownApiStyles)}.[/]");
+            return 1;
+        }
 
-        var root = SolutionScaffolder.Scaffold(Directory.GetCurrentDirectory(), settings.Name, settings.Adapter, settings.Persistence, layout);
-        AnsiConsole.MarkupLineInterpolated($"[green]Created {settings.Name} at {root} (adapter: {settings.Adapter}, persistence: {settings.Persistence}, architecture: {settings.Architecture}).[/]");
+        var layout = settings.Architecture == "clean-architecture" ? SolutionLayout.CleanArchitecture : SolutionLayout.VerticalSlice;
+        var apiStyle = settings.ApiStyle == "controllers" ? ApiStyle.Controllers : ApiStyle.MinimalApi;
+
+        var root = SolutionScaffolder.Scaffold(Directory.GetCurrentDirectory(), settings.Name, settings.Adapter, settings.Persistence, layout, apiStyle);
+        AnsiConsole.MarkupLineInterpolated($"[green]Created {settings.Name} at {root} (adapter: {settings.Adapter}, persistence: {settings.Persistence}, architecture: {settings.Architecture}, api-style: {settings.ApiStyle}).[/]");
         return 0;
     }
 }

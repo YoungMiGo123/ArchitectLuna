@@ -82,12 +82,11 @@ public sealed class PaginationSnapshotTests
             GenerationTestHarness.VerticalSliceContext(), adapter, "in-memory", GenerationTestHarness.InvoiceFeature());
         var endpoint = GenerationTestHarness.ContentOf(files, $"{Slice}/GetAllInvoicesEndpoint.cs");
 
-        Assert.Contains("items = result.Value.Items.Select(item => item.ToResponse()).ToList()", endpoint);
-        Assert.Contains("result.Value.Page", endpoint);
-        Assert.Contains("result.Value.PageSize", endpoint);
-        Assert.Contains("result.Value.TotalCount", endpoint);
-        Assert.Contains("result.Value.TotalPages", endpoint);
-        Assert.Contains("result.Value.HasNextPage", endpoint);
-        Assert.Contains("result.Value.HasPreviousPage", endpoint);
+        // Paging metadata now flows through a typed PagedResponse<T> (TotalPages/HasNextPage/
+        // HasPreviousPage are computed properties on it), wrapped in the ApiResponse<T> envelope.
+        Assert.Contains("value.Items.Select(item => item.ToResponse()).ToList()", endpoint);
+        Assert.Contains("value.Page, value.PageSize, value.TotalCount", endpoint);
+        Assert.Contains("PagedResponse<GetAllInvoicesResponse>", endpoint);
+        Assert.Contains("ApiResponse<", endpoint);
     }
 }

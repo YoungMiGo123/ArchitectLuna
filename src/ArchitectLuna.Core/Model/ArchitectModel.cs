@@ -23,6 +23,12 @@ public sealed class ArchitectModel
     public PersistenceProvider Persistence { get; init; } = PersistenceProvider.None;
 
     /// <summary>
+    /// How generated HTTP endpoints are hosted: Minimal API (default) or Controllers. Both
+    /// produce the identical HTTP surface — see <see cref="Model.ApiStyle"/>.
+    /// </summary>
+    public ApiStyle ApiStyle { get; init; } = ApiStyle.MinimalApi;
+
+    /// <summary>
     /// Output shape: VerticalSlice or CleanArchitecture. No default — a model.yaml missing this
     /// key fails validation instead of silently resolving to VerticalSlice.
     /// </summary>

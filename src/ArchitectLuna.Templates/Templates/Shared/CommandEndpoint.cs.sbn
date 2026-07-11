@@ -1,6 +1,8 @@
 using FluentValidation;
 using {{ dispatcher_using }};
 using {{ api_root_namespace }}.Common;
+using {{ api_root_namespace }}.Responses;
+using {{ api_root_namespace }}.Results;
 using {{ message_namespace }};
 using {{ results_namespace }};
 {{ if has_contracts_using }}
@@ -20,22 +22,18 @@ public sealed class {{ endpoint_name }} : IEndpointDefinition
             var validationResult = await validator.ValidateAsync(command, cancellationToken);
             if (!validationResult.IsValid)
             {
-                return Results.ValidationProblem(validationResult.ToDictionary());
+                return validationResult.ToValidationErrorResponse();
             }
 
             var result = await {{ dispatch_call }};
-            return result.IsSuccess
-                ? {{ success_expression }}
-                : result.ToProblem();
-        });
+            return {{ success_expression }};
+        })
         {{ else if has_route_id }}
         app.{{ http_map_method }}("{{ route }}", async (Guid id, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken) =>
         {
             var result = await {{ dispatch_call }};
-            return result.IsSuccess
-                ? {{ success_expression }}
-                : result.ToProblem();
-        });
+            return {{ success_expression }};
+        })
         {{ else }}
         app.{{ http_map_method }}("{{ route }}", async ({{ request_name }} request, IValidator<{{ message_name }}> validator, {{ dispatcher_type }} {{ dispatcher_param }}, CancellationToken cancellationToken) =>
         {
@@ -43,14 +41,21 @@ public sealed class {{ endpoint_name }} : IEndpointDefinition
             var validationResult = await validator.ValidateAsync(command, cancellationToken);
             if (!validationResult.IsValid)
             {
-                return Results.ValidationProblem(validationResult.ToDictionary());
+                return validationResult.ToValidationErrorResponse();
             }
 
             var result = await {{ dispatch_call }};
-            return result.IsSuccess
-                ? {{ success_expression }}
-                : result.ToProblem();
-        });
+            return {{ success_expression }};
+        })
         {{ end }}
+        {{ if success_response_type }}
+            .Produces<ApiResponse<{{ success_response_type }}>>({{ success_status_code }})
+        {{ else }}
+            .Produces({{ success_status_code }})
+        {{ end }}
+            .Produces<ApiResponse<object>>(StatusCodes.Status400BadRequest)
+            .Produces<ApiResponse<object>>(StatusCodes.Status404NotFound)
+            .Produces<ApiResponse<object>>(StatusCodes.Status409Conflict)
+            .Produces<ApiResponse<object>>(StatusCodes.Status500InternalServerError);
     }
 }

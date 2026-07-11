@@ -62,7 +62,7 @@ public sealed class MediatRAdapter : IFrameworkAdapter
         "FluentValidation.DependencyInjectionExtensions",
     };
 
-    public IReadOnlyList<GeneratedFile> GenerateCommand(GenerationContext context, FeatureModel feature, CommandModel command)
+    public IReadOnlyList<GeneratedFile> GenerateCommand(GenerationContext context, FeatureModel feature, CommandModel command, ApiStyle apiStyle = ApiStyle.MinimalApi)
     {
         var names = new SliceNames(command.Name, "Command");
         var slice = new SlicePaths(context, feature.Name, command.Name);
@@ -102,16 +102,39 @@ public sealed class MediatRAdapter : IFrameworkAdapter
             _ => "MapPost",
         };
 
+        var httpAttribute = command.Kind switch
+        {
+            CommandKind.Update => "HttpPut",
+            CommandKind.Delete => "HttpDelete",
+            _ => "HttpPost",
+        };
+
         var dispatchCall = command.Kind == CommandKind.Delete
             ? $"{DispatcherParam}.Send(new {names.Message}(id), cancellationToken)"
             : $"{DispatcherParam}.Send(command, cancellationToken)";
 
-        var successExpression = command.Kind switch
+        var successExpression = apiStyle == ApiStyle.Controllers
+            ? command.Kind switch
+            {
+                CommandKind.Create => $"result.ToCreatedActionResponse(value => $\"{route}/{{value.Id}}\", value => value.ToResponse())",
+                CommandKind.Update => "result.ToOkActionResponse(value => value.ToResponse())",
+                _ => "result.ToNoContentActionResponse()",
+            }
+            : command.Kind switch
+            {
+                CommandKind.Create => $"result.ToCreatedResponse(value => $\"{route}/{{value.Id}}\", value => value.ToResponse())",
+                CommandKind.Update => "result.ToOkResponse(value => value.ToResponse())",
+                _ => "result.ToNoContentResponse()",
+            };
+
+        var successStatusCode = command.Kind switch
         {
-            CommandKind.Create => $"Results.Created($\"{route}/{{result.Value.Id}}\", result.Value.ToResponse())",
-            CommandKind.Update => "Results.Ok(result.Value.ToResponse())",
-            _ => "Results.NoContent()",
+            CommandKind.Create => "StatusCodes.Status201Created",
+            CommandKind.Update => "StatusCodes.Status200OK",
+            _ => "StatusCodes.Status204NoContent",
         };
+
+        var hasContractsUsing = (hasBody || hasResponse) && slice.ContractsNamespace != slice.ApplicationNamespace;
 
         var endpointModel = new CommandEndpointRenderModel
         {
@@ -132,8 +155,35 @@ public sealed class MediatRAdapter : IFrameworkAdapter
             ResultsNamespace = resultsNamespace,
             RequestName = hasBody ? names.Request : null,
             ContractsNamespace = slice.ContractsNamespace,
-            HasContractsUsing = (hasBody || hasResponse) && slice.ContractsNamespace != slice.ApplicationNamespace,
+            HasContractsUsing = hasContractsUsing,
             SuccessExpression = successExpression,
+            SuccessResponseType = hasResponse ? names.Response : null,
+            SuccessStatusCode = successStatusCode,
+        };
+
+        var controllerModel = new CommandControllerRenderModel
+        {
+            Namespace = slice.EndpointNamespace,
+            ApiRootNamespace = context.Api.RootNamespace,
+            MessageNamespace = slice.ApplicationNamespace,
+            MessageName = names.Message,
+            ControllerName = names.Controller,
+            ResultType = wrappedResultType,
+            Route = route,
+            HttpAttribute = httpAttribute,
+            HasRouteId = hasRouteId,
+            HasBody = hasBody,
+            DispatcherUsing = DispatcherUsing,
+            DispatcherType = DispatcherType,
+            DispatcherParam = DispatcherParam,
+            DispatchCall = dispatchCall,
+            ResultsNamespace = resultsNamespace,
+            RequestName = hasBody ? names.Request : null,
+            ContractsNamespace = slice.ContractsNamespace,
+            HasContractsUsing = hasContractsUsing,
+            SuccessExpression = successExpression,
+            SuccessResponseType = hasResponse ? names.Response : null,
+            SuccessStatusCode = successStatusCode,
         };
 
         var files = new List<GeneratedFile>
@@ -201,12 +251,19 @@ public sealed class MediatRAdapter : IFrameworkAdapter
             })));
         }
 
-        files.Add(new GeneratedFile($"{slice.EndpointPath}/{names.Endpoint}.cs", RenderShared("CommandEndpoint.cs.sbn", endpointModel)));
+        if (apiStyle == ApiStyle.Controllers)
+        {
+            files.Add(new GeneratedFile($"{slice.EndpointPath}/{names.Controller}.cs", RenderShared("CommandController.cs.sbn", controllerModel)));
+        }
+        else
+        {
+            files.Add(new GeneratedFile($"{slice.EndpointPath}/{names.Endpoint}.cs", RenderShared("CommandEndpoint.cs.sbn", endpointModel)));
+        }
 
         return files;
     }
 
-    public IReadOnlyList<GeneratedFile> GenerateQuery(GenerationContext context, FeatureModel feature, QueryModel query)
+    public IReadOnlyList<GeneratedFile> GenerateQuery(GenerationContext context, FeatureModel feature, QueryModel query, ApiStyle apiStyle = ApiStyle.MinimalApi)
     {
         var names = new SliceNames(query.Name, "Query");
         var slice = new SlicePaths(context, feature.Name, query.Name);
@@ -258,11 +315,23 @@ public sealed class MediatRAdapter : IFrameworkAdapter
                 ? $"{DispatcherParam}.Send(new {names.Message}(), cancellationToken)"
                 : $"{DispatcherParam}.Send(query, cancellationToken)";
 
+        var pagedResponseType = $"{context.Contracts.RootNamespace}.Common.PagedResponse<{names.Response}>";
+
+        var okMethod = apiStyle == ApiStyle.Controllers ? "ToOkActionResponse" : "ToOkResponse";
+
         var successExpression = query.IsPaged
-            ? "Results.Ok(new { items = result.Value.Items.Select(item => item.ToResponse()).ToList(), result.Value.Page, result.Value.PageSize, result.Value.TotalCount, result.Value.TotalPages, result.Value.HasNextPage, result.Value.HasPreviousPage })"
+            ? $"result.{okMethod}(value => new {pagedResponseType}(value.Items.Select(item => item.ToResponse()).ToList(), value.Page, value.PageSize, value.TotalCount))"
             : query.IsCollection
-                ? "Results.Ok(result.Value.Select(item => item.ToResponse()).ToList())"
-                : "Results.Ok(result.Value.ToResponse())";
+                ? $"result.{okMethod}(value => value.Select(item => item.ToResponse()).ToList())"
+                : $"result.{okMethod}(value => value.ToResponse())";
+
+        var successResponseType = query.IsPaged
+            ? pagedResponseType
+            : query.IsCollection
+                ? $"IReadOnlyList<{names.Response}>"
+                : names.Response;
+
+        var hasContractsUsing = slice.ContractsNamespace != slice.ApplicationNamespace;
 
         var endpointModel = new QueryEndpointRenderModel
         {
@@ -284,31 +353,57 @@ public sealed class MediatRAdapter : IFrameworkAdapter
             DispatchCall = dispatchCall,
             ResultsNamespace = resultsNamespace,
             ContractsNamespace = slice.ContractsNamespace,
-            HasContractsUsing = slice.ContractsNamespace != slice.ApplicationNamespace,
+            HasContractsUsing = hasContractsUsing,
             SuccessExpression = successExpression,
+            SuccessResponseType = successResponseType,
         };
 
-        return new[]
+        var controllerModel = new QueryControllerRenderModel
         {
-            new GeneratedFile($"{slice.ApplicationPath}/{names.Message}.cs", RenderAdapter("Message.cs.sbn", messageModel)),
-            new GeneratedFile($"{slice.ApplicationPath}/{names.Result}.cs", RenderShared("Record.cs.sbn", new RecordRenderModel
+            Namespace = slice.EndpointNamespace,
+            ApiRootNamespace = context.Api.RootNamespace,
+            MessageNamespace = slice.ApplicationNamespace,
+            MessageName = names.Message,
+            ControllerName = names.Controller,
+            ResultType = wrappedResultType,
+            Route = route,
+            Params = parameters,
+            IsSingleRouteParam = isSingleRouteParam,
+            IsZeroParam = isZeroParam,
+            RouteParamName = routeParamName,
+            RouteParamType = isSingleRouteParam ? query.Params[0].Type : null,
+            DispatcherUsing = DispatcherUsing,
+            DispatcherType = DispatcherType,
+            DispatcherParam = DispatcherParam,
+            DispatchCall = dispatchCall,
+            ResultsNamespace = resultsNamespace,
+            ContractsNamespace = slice.ContractsNamespace,
+            HasContractsUsing = hasContractsUsing,
+            SuccessExpression = successExpression,
+            SuccessResponseType = successResponseType,
+        };
+
+        var files = new List<GeneratedFile>
+        {
+            new($"{slice.ApplicationPath}/{names.Message}.cs", RenderAdapter("Message.cs.sbn", messageModel)),
+            new($"{slice.ApplicationPath}/{names.Result}.cs", RenderShared("Record.cs.sbn", new RecordRenderModel
             {
                 Namespace = slice.ApplicationNamespace,
                 RecordName = names.Result,
                 Fields = resultFields,
             })),
-            new GeneratedFile($"{slice.ApplicationPath}/{names.Handler}.cs", RenderAdapter("Handler.cs.sbn", messageModel)),
-            new GeneratedFile($"{slice.ContractsPath}/{names.Response}.cs", RenderShared("Record.cs.sbn", new RecordRenderModel
+            new($"{slice.ApplicationPath}/{names.Handler}.cs", RenderAdapter("Handler.cs.sbn", messageModel)),
+            new($"{slice.ContractsPath}/{names.Response}.cs", RenderShared("Record.cs.sbn", new RecordRenderModel
             {
                 Namespace = slice.ContractsNamespace,
                 RecordName = names.Response,
                 Fields = resultFields,
             })),
-            new GeneratedFile($"{slice.ApplicationPath}/{names.Mappings}.cs", RenderShared("Mappings.cs.sbn", new MappingsRenderModel
+            new($"{slice.ApplicationPath}/{names.Mappings}.cs", RenderShared("Mappings.cs.sbn", new MappingsRenderModel
             {
                 Namespace = slice.ApplicationNamespace,
                 ContractsNamespace = slice.ContractsNamespace,
-                NeedsContractsUsing = slice.ContractsNamespace != slice.ApplicationNamespace,
+                NeedsContractsUsing = hasContractsUsing,
                 MappingsName = names.Mappings,
                 HasRequest = false,
                 HasResponse = true,
@@ -316,8 +411,18 @@ public sealed class MediatRAdapter : IFrameworkAdapter
                 ResponseName = names.Response,
                 ToResponseArgs = string.Join(", ", resultFields.Select(f => $"result.{f.Name}")),
             })),
-            new GeneratedFile($"{slice.EndpointPath}/{names.Endpoint}.cs", RenderShared("QueryEndpoint.cs.sbn", endpointModel)),
         };
+
+        if (apiStyle == ApiStyle.Controllers)
+        {
+            files.Add(new GeneratedFile($"{slice.EndpointPath}/{names.Controller}.cs", RenderShared("QueryController.cs.sbn", controllerModel)));
+        }
+        else
+        {
+            files.Add(new GeneratedFile($"{slice.EndpointPath}/{names.Endpoint}.cs", RenderShared("QueryEndpoint.cs.sbn", endpointModel)));
+        }
+
+        return files;
     }
 
     /// <summary>Standard file/type names derived from one operation name (message suffix is "Command" or "Query").</summary>
@@ -327,6 +432,7 @@ public sealed class MediatRAdapter : IFrameworkAdapter
         public string Handler => $"{OperationName}Handler";
         public string Validator => $"{OperationName}Validator";
         public string Endpoint => $"{OperationName}Endpoint";
+        public string Controller => $"{OperationName}Controller";
         public string Result => $"{OperationName}Result";
         public string Request => $"{OperationName}Request";
         public string Response => $"{OperationName}Response";
